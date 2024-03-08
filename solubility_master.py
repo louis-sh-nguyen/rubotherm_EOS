@@ -675,23 +675,23 @@ if __name__ == "__main__":
     # plt.show()  
     
     #* Vm
-    # p = linspace(1, 10e5, 5)  #[Pa]  
-    # Vm_25C = [1/mixture.rho_mix(25+273,_p) for _p in p]
-    # Vm_35C = [1/mixture.rho_mix(35+273,_p) for _p in p]
-    # Vm_50C = [1/mixture.rho_mix(50+273,_p) for _p in p]
-    # print("Vm at 25C = ", *Vm_25C)
-    # print("Vm at 35C = ", *Vm_35C)
-    # print("Vm at 50C = ", *Vm_50C)
+    p = linspace(1, 10e5, 5)  #[Pa]  
+    Vm_25C = [1/mixture.rho_mix(25+273,_p) for _p in p]
+    Vm_35C = [1/mixture.rho_mix(35+273,_p) for _p in p]
+    Vm_50C = [1/mixture.rho_mix(50+273,_p) for _p in p]
+    print("Vm at 25C = ", *Vm_25C)
+    print("Vm at 35C = ", *Vm_35C)
+    print("Vm at 50C = ", *Vm_50C)
     
-    # fig = plt.figure()
-    # ax = fig.add_subplot(111)
-    # ax.plot(p*1e-5,Vm_25C,label="25C")
-    # ax.plot(p*1e-5,Vm_35C,label="35C")
-    # ax.plot(p*1e-5,Vm_50C,label="50C")
-    # ax.set_xlabel("p [bar]")
-    # ax.set_ylabel("V_m [m3/g]")
-    # ax.legend().set_visible(True)
-    # plt.show()  
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.plot(p*1e-5,Vm_25C,label="25C")
+    ax.plot(p*1e-5,Vm_35C,label="35C")
+    ax.plot(p*1e-5,Vm_50C,label="50C")
+    ax.set_xlabel("p [bar]")
+    ax.set_ylabel("V_m [m3/g]")
+    ax.legend().set_visible(True)
+    plt.show()  
     
     # * Vam
     p = linspace(1, 100e5, 5)  #[Pa]  
