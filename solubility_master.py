@@ -694,22 +694,22 @@ if __name__ == "__main__":
     # plt.show()  
     
     # * Vam
-    # p = linspace(1, 100e5, 5)  #[Pa]  
-    # Va_25C = [1/mixture.rho_am(25+273,_p) for _p in p]
-    # Va_35C = [1/mixture.rho_am(35+273,_p) for _p in p]
-    # Va_50C = [1/mixture.rho_am(50+273,_p) for _p in p]
-    # print("Va at 25C = ", *Va_25C)
-    # print("Va at 35C = ", *Va_35C)
-    # print("Va at 50C = ", *Va_50C)
-    # fig = plt.figure()
-    # ax = fig.add_subplot(111)
-    # ax.plot(p*1e-5,Va_25C,label="25C")
-    # ax.plot(p*1e-5,Va_35C,label="35C")
-    # ax.plot(p*1e-5,Va_50C,label="50C")
-    # ax.set_xlabel("p [bar]")
-    # ax.set_ylabel("V_am [m3/g]")
-    # ax.legend().set_visible(True)
-    # plt.show()
+    p = linspace(1, 100e5, 5)  #[Pa]  
+    Va_25C = [1/mixture.rho_am(25+273,_p) for _p in p]
+    Va_35C = [1/mixture.rho_am(35+273,_p) for _p in p]
+    Va_50C = [1/mixture.rho_am(50+273,_p) for _p in p]
+    print("Va at 25C = ", *Va_25C)
+    print("Va at 35C = ", *Va_35C)
+    print("Va at 50C = ", *Va_50C)
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.plot(p*1e-5,Va_25C,label="25C")
+    ax.plot(p*1e-5,Va_35C,label="35C")
+    ax.plot(p*1e-5,Va_50C,label="50C")
+    ax.set_xlabel("p [bar]")
+    ax.set_ylabel("V_am [m3/g]")
+    ax.legend().set_visible(True)
+    plt.show()
     
     
     # * Ssc
