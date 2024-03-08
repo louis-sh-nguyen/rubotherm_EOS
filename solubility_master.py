@@ -116,7 +116,7 @@ class SolPolMixture:
             mix_obj.saftgammamie()
             eos_mix = saftgammamie(mix_obj, compute_critical=False)
             self.eos_mix = eos_mix
-    # safasdf
+    
     # @property
     # def eos_sol(self):
     #     if self.sol != None:
@@ -713,20 +713,20 @@ if __name__ == "__main__":
     
     
     # * Ssc
-    # p = linspace(1, 10e5, 5)  #[Pa]  
-    # Ssc_25C = [mixture.S_sc(25+273,_p) for _p in p]
-    # Ssc_35C = [mixture.S_sc(35+273,_p) for _p in p]
-    # Ssc_50C = [mixture.S_sc(50+273,_p) for _p in p]
+    p = linspace(1, 10e5, 5)  #[Pa]  
+    Ssc_25C = [mixture.S_sc(25+273,_p) for _p in p]
+    Ssc_35C = [mixture.S_sc(35+273,_p) for _p in p]
+    Ssc_50C = [mixture.S_sc(50+273,_p) for _p in p]
     
-    # print("Ssc at 25C = ", *Ssc_25C)
-    # print("Ssc at 35C = ", *Ssc_35C)
-    # print("Ssc at 50C = ", *Ssc_50C)
-    # fig = plt.figure()
-    # ax = fig.add_subplot(111)
-    # ax.plot(p*1e-5,Ssc_25C,label="25C")
-    # ax.plot(p*1e-5,Ssc_35C,label="35C")
-    # ax.plot(p*1e-5,Ssc_50C,label="50C")
-    # ax.set_xlabel("p [bar]")
-    # ax.set_ylabel("S_sc [g/g]")
-    # ax.legend().set_visible(True)
-    # plt.show()    
+    print("Ssc at 25C = ", *Ssc_25C)
+    print("Ssc at 35C = ", *Ssc_35C)
+    print("Ssc at 50C = ", *Ssc_50C)
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.plot(p*1e-5,Ssc_25C,label="25C")
+    ax.plot(p*1e-5,Ssc_35C,label="35C")
+    ax.plot(p*1e-5,Ssc_50C,label="50C")
+    ax.set_xlabel("p [bar]")
+    ax.set_ylabel("S_sc [g/g]")
+    ax.legend().set_visible(True)
+    plt.show()    
