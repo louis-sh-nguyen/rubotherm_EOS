@@ -116,7 +116,7 @@ class SolPolMixture:
             mix_obj.saftgammamie()
             eos_mix = saftgammamie(mix_obj, compute_critical=False)
             self.eos_mix = eos_mix
-    
+    # safasdf
     # @property
     # def eos_sol(self):
     #     if self.sol != None:
