@@ -230,10 +230,10 @@ class SolPolMixture:
         
         if isclose(P, self.eos_mix.pressure(x,rhoL,T), P*0.01):
             rho = rhoL
-            print("Use rhoL")
+            # print("Use rhoL")
         elif isclose(P, self.eos_mix.pressure(x,rhoV,T), P*0.01):
             rho = rhoV
-            print("Use rhoV")
+            # print("Use rhoV")
         
         return rho
 
@@ -288,6 +288,47 @@ class SolPolMixture:
         
         return dV_dnp / self.MW_pol # [m^3/g]
     
+    def Vs_Vp_pmv1(self, T: float, P: float):
+        """Function to calculate partial volume of solute in mixture, using solubility composition.
+        Unit = [m3/g]
+
+        Args:
+            T (float): temperature [K].
+            P (float): pressure [Pa].
+        """
+        S_a = self.S_am(T, P)  # [g/g]    
+        omega_p = 1/(S_a+1)     # [g/g]
+        omega_s = 1 - omega_p   # [g/g]
+        x_s = (omega_s/self.MW_sol) / (omega_s/self.MW_sol + omega_p/self.MW_pol)   #[mol/mol]
+        x_p = 1 - x_s   #[mol/mol]           
+        x = hstack([x_s, x_p])   # [mol/mol]        
+        V_s = self.V_sol(x, T, P)  # [m^3/g]        
+        V_p = self.V_pol(x, T, P)  # [m^3/g]
+        return V_s, V_p
+    
+    def Vs_Vp_pmv2(self, T: float, P: float):
+        """Function to calculate partial volume of solute in mixture, assuming Vs and Vp same as specific volume at __infinitely dilution__.
+        Unit = [m3/g]
+
+        Args:
+            T (float): temperature [K].
+            P (float): pressure [Pa].
+        """
+        V_s = self.V_sol(hstack([0., 1.]), T, P)  # [m^3/g]        
+        V_p = self.V_pol(hstack([0., 1.]), T, P)  # [m^3/g]
+        return V_s, V_p
+    
+    def Vs_Vp_pmv3(self, T: float):
+        """Function to calculate partial volume of solute in mixture, assuming Vs and Vp at __infinitely dilution__, unchanged at atmospheric pressure.
+        Unit = [m3/g]
+
+        Args:
+            T (float): temperature [K].            
+        """
+        V_s = self.V_sol(hstack([0., 1.]), T, 1e5)  # [m^3/g]        
+        V_p = self.V_pol(hstack([0., 1.]), T, 1e5)  # [m^3/g]
+        return V_s, V_p
+    
     def rho_am(self, T: float, P: float):
         """Function to get density of amorphous domain of polymer.
         Unit = [g/m^3]
@@ -298,28 +339,19 @@ class SolPolMixture:
             pmv_method (str): method to calculate partial molar volume. Default: "1".
         """
         
-        S_a = self.S_am(T, P)  # [g/g]        
-        omega_p = 1/(S_a+1)     # [g/g]
-        omega_s = 1 - omega_p   # [g/g]
-        x_s = (omega_s/self.MW_sol) / (omega_s/self.MW_sol + omega_p/self.MW_pol)   #[mol/mol]
-        x_p = 1 - x_s   #[mol/mol]           
-        x = hstack([x_s, x_p])   # [mol/mol]        
-        print("x = ", *x)
+        S_a = self.S_am(T, P)  # [g/g]
         
         #* METHOD 1: Evaluate Vs and Vp at each composition, most robust
         if self.pmv_method == "1":
-            V_s = self.V_sol(x, T, P)  # [m^3/g]        
-            V_p = self.V_pol(x, T, P)  # [m^3/g]
+            V_s, V_p =  self.Vs_Vp_pmv1(T, P)            
         
         #* METHOD 2: Assuming Vs and Vp same as specific volume at __infinitely dilution__ 
         if self.pmv_method == "2":
-            V_s = self.V_sol(hstack([0., 1.]), T, P)  # [m^3/g]        
-            V_p = self.V_pol(hstack([0., 1.]), T, P)  # [m^3/g]
+            V_s, V_p =  self.Vs_Vp_pmv2(T, P)
         
         #* METHOD 3: Assuming Vs and Vp at __infinitely dilution__, unchanged at atmospheric pressure, least robust
         if self.pmv_method == "3":
-            V_s = self.V_sol(hstack([0., 1.]), T, 1e5)  # [m^3/g]        
-            V_p = self.V_pol(hstack([0., 1.]), T, 1e5)  # [m^3/g]
+            V_s, V_p =  self.Vs_Vp_pmv3(T)
         
         print(f"Vs at {T}K and {P} Pa = ", V_s)
         print(f"Vp at {T}K and {P} Pa = ", V_p)
@@ -555,6 +587,7 @@ def plot_isotherm_pmv(spm, T_list:list[float], export_data:bool = False):
         # Sorption without swelling correction
         S_exp_woSW = (_df["MP1*[g]"]-data.m_met_filled+_df["ρ[g/cc]"]*(data.Vs+data.Vbasket)) / data.ms
         _df['S_exp_woSW[g/g]']=S_exp_woSW
+        
         # Calculate swelling ratio from SAFT using pmv 1
         spm.pmv_method = "1"
         SwR_SAFT_pmv1 = [spm.SwellingRatio(T,_p) for _p in _df["P[bar]"]*1e5]
@@ -616,6 +649,47 @@ def plot_isotherm_pmv(spm, T_list:list[float], export_data:bool = False):
     ax.legend().set_visible(True)
     plt.show()
 
+def plot_pmv(spm, T: float):
+    """Function to plot partial molar volume isotherms.
+
+    Args:
+        spm (class object): class object representing the sol-pol mixture.
+        T_list (float): temperature list [K].
+        export_data (bool, optional): export data. Defaults to False.
+    """
+    data = SolPolExpData(spm.sol, spm.pol)    
+    _df=data.get_sorption_data(T)
+    p = linspace(1, _df["P[bar]"].tolist()[-1]*1e5, 10) #[Pa]
+    Vs_pmv1, Vp_pmv1 = zip(*[mixture.Vs_Vp_pmv1(T, _p) for _p in p])
+    Vs_pmv2, Vp_pmv2 = zip(*[mixture.Vs_Vp_pmv2(T, _p) for _p in p])
+    Vs_pmv3, Vp_pmv3 = zip(*[mixture.Vs_Vp_pmv3(T) for _p in p])
+    
+    # Vs_pmv1 = [mixture.Vs_Vp_pmv1(T, _p)[0] for _p in p]
+    # Vp_pmv1 = [mixture.Vs_Vp_pmv1(T, _p)[1] for _p in p]
+    # Vs_pmv2 = [mixture.Vs_Vp_pmv2(T, _p)[0] for _p in p]
+    # Vp_pmv2 = [mixture.Vs_Vp_pmv2(T, _p)[1] for _p in p]
+    # Vs_pmv3 = [mixture.Vs_Vp_pmv3(T)[0] for _p in p]
+    # Vp_pmv3 = [mixture.Vs_Vp_pmv3(T)[1] for _p in p]   
+    
+    fig = plt.figure(figsize=[4.0, 7])
+    ax1 = fig.add_subplot(211)
+    ax1.plot(p*1e-5,Vs_pmv1, color=custom_colours[1], linestyle="solid", marker="None", label=f"{T-273}°C pmv1")
+    ax1.plot(p*1e-5,Vs_pmv2, color=custom_colours[2], linestyle="solid", marker="None", label=f"{T-273}°C pmv2")
+    ax1.plot(p*1e-5,Vs_pmv3, color=custom_colours[3], linestyle="solid", marker="None", label=f"{T-273}°C pmv3")
+    ax1.set_xlabel("P [bar]")
+    ax1.set_ylabel(r"$V_{sol}$ [$m^{3}/g$]")
+    ax1.tick_params(direction="in")
+    ax1.legend().set_visible(True)
+    
+    ax2 = fig.add_subplot(212)
+    ax2.plot(p*1e-5,Vp_pmv1, color=custom_colours[1], linestyle="solid", marker="None", label=f"{T-273}°C pmv1")
+    ax2.plot(p*1e-5,Vp_pmv2, color=custom_colours[2], linestyle="solid", marker="None", label=f"{T-273}°C pmv2")
+    ax2.plot(p*1e-5,Vp_pmv3, color=custom_colours[3], linestyle="solid", marker="None", label=f"{T-273}°C pmv3")
+    ax2.set_xlabel("P [bar]")
+    ax2.set_ylabel(r"$V_{pol}$ [$m^{3}/g$]")
+    ax2.tick_params(direction="in")
+    ax2.legend().set_visible(True)
+    plt.show()
 
     
 if __name__ == "__main__":
@@ -630,7 +704,7 @@ if __name__ == "__main__":
     # print("SR = ",mixture.SwellingRatio(35+273,10e5))
     # plot_isotherm_EOSvExp(mixture, [50+273,], export_data=False)
     # plot_isotherm_EOSvExp(mixture,[25+273, 35+273, 50+273],export_data="True")
-    plot_isotherm_pmv(mixture, [50+273,], export_data=True)
+    # plot_isotherm_pmv(mixture, [50+273,], export_data=True)
     # S = get_S_sc(mixture, 35+273, 1e5)
     # rho_m = mixture.rho_mix(35+273, 1e5)
     # print(f"rho_mix = {rho_m*1e-6} g/cm^3")
@@ -640,6 +714,7 @@ if __name__ == "__main__":
     # print("Vp = ", mixture.V_pol(hstack([0, 1]), 50+273,1e6), " m^3/g")
     # print("rho_am = ", mixture.rho_am(35+273,1e5), " g/m^3")
     # print("SwR = ", mixture.SwellingRatio(25+273,1e5), " cm^3/cm^3")
+    plot_pmv(mixture, 50+273)
     
     #* SW total
     # p = linspace(1,10e5,5)
@@ -654,6 +729,28 @@ if __name__ == "__main__":
     # ax.plot(p*1e-5,SwR_25C,label="25C")
     # ax.plot(p*1e-5,SwR_35C,label="35C")
     # ax.plot(p*1e-5,SwR_50C,label="50C")
+    # ax.set_xlabel("p [bar]")
+    # ax.set_ylabel("Swelling Ratio (cm3/cm3)")
+    # ax.legend().set_visible(True)
+    # plt.show()
+    
+    #* SW total with different pmv method
+    # T=25+273    # [K]
+    # p = linspace(1,10e5,5)
+    # mixture.pmv_method = "1"    
+    # SwR_pmv1 = [mixture.SwellingRatio(T, _p) for _p in p]
+    # mixture.pmv_method = "2"
+    # SwR_pmv2 = [mixture.SwellingRatio(T, _p) for _p in p]
+    # mixture.pmv_method = "3"
+    # SwR_pmv3 = [mixture.SwellingRatio(T, _p) for _p in p]
+    # print(f"Swelling Ratio pmv1 at {T-273}C = ", *SwR_pmv1)
+    # print(f"Swelling Ratio pmv2 at {T-273}C = ", *SwR_pmv2)
+    # print(f"Swelling Ratio pmv3 at {T-273}C = ", *SwR_pmv3)
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111)
+    # ax.plot(p*1e-5,SwR_pmv1,label="pmv1")
+    # ax.plot(p*1e-5,SwR_pmv2,label="pmv2")
+    # ax.plot(p*1e-5,SwR_pmv3,label="pmv3")
     # ax.set_xlabel("p [bar]")
     # ax.set_ylabel("Swelling Ratio (cm3/cm3)")
     # ax.legend().set_visible(True)
@@ -675,58 +772,58 @@ if __name__ == "__main__":
     # plt.show()  
     
     #* Vm
-    p = linspace(1, 10e5, 5)  #[Pa]  
-    Vm_25C = [1/mixture.rho_mix(25+273,_p) for _p in p]
-    Vm_35C = [1/mixture.rho_mix(35+273,_p) for _p in p]
-    Vm_50C = [1/mixture.rho_mix(50+273,_p) for _p in p]
-    print("Vm at 25C = ", *Vm_25C)
-    print("Vm at 35C = ", *Vm_35C)
-    print("Vm at 50C = ", *Vm_50C)
+    # p = linspace(1, 10e5, 5)  #[Pa]  
+    # Vm_25C = [1/mixture.rho_mix(25+273,_p) for _p in p]
+    # Vm_35C = [1/mixture.rho_mix(35+273,_p) for _p in p]
+    # Vm_50C = [1/mixture.rho_mix(50+273,_p) for _p in p]
+    # print("Vm at 25C = ", *Vm_25C)
+    # print("Vm at 35C = ", *Vm_35C)
+    # print("Vm at 50C = ", *Vm_50C)
     
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    ax.plot(p*1e-5,Vm_25C,label="25C")
-    ax.plot(p*1e-5,Vm_35C,label="35C")
-    ax.plot(p*1e-5,Vm_50C,label="50C")
-    ax.set_xlabel("p [bar]")
-    ax.set_ylabel("V_m [m3/g]")
-    ax.legend().set_visible(True)
-    plt.show()  
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111)
+    # ax.plot(p*1e-5,Vm_25C,label="25C")
+    # ax.plot(p*1e-5,Vm_35C,label="35C")
+    # ax.plot(p*1e-5,Vm_50C,label="50C")
+    # ax.set_xlabel("p [bar]")
+    # ax.set_ylabel("V_m [m3/g]")
+    # ax.legend().set_visible(True)
+    # plt.show()  
     
     # * Vam
-    p = linspace(1, 100e5, 5)  #[Pa]  
-    Va_25C = [1/mixture.rho_am(25+273,_p) for _p in p]
-    Va_35C = [1/mixture.rho_am(35+273,_p) for _p in p]
-    Va_50C = [1/mixture.rho_am(50+273,_p) for _p in p]
-    print("Va at 25C = ", *Va_25C)
-    print("Va at 35C = ", *Va_35C)
-    print("Va at 50C = ", *Va_50C)
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    ax.plot(p*1e-5,Va_25C,label="25C")
-    ax.plot(p*1e-5,Va_35C,label="35C")
-    ax.plot(p*1e-5,Va_50C,label="50C")
-    ax.set_xlabel("p [bar]")
-    ax.set_ylabel("V_am [m3/g]")
-    ax.legend().set_visible(True)
-    plt.show()
+    # p = linspace(1, 100e5, 5)  #[Pa]  
+    # Va_25C = [1/mixture.rho_am(25+273,_p) for _p in p]
+    # Va_35C = [1/mixture.rho_am(35+273,_p) for _p in p]
+    # Va_50C = [1/mixture.rho_am(50+273,_p) for _p in p]
+    # print("Va at 25C = ", *Va_25C)
+    # print("Va at 35C = ", *Va_35C)
+    # print("Va at 50C = ", *Va_50C)
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111)
+    # ax.plot(p*1e-5,Va_25C,label="25C")
+    # ax.plot(p*1e-5,Va_35C,label="35C")
+    # ax.plot(p*1e-5,Va_50C,label="50C")
+    # ax.set_xlabel("p [bar]")
+    # ax.set_ylabel("V_am [m3/g]")
+    # ax.legend().set_visible(True)
+    # plt.show()
     
     
     # * Ssc
-    p = linspace(1, 10e5, 5)  #[Pa]  
-    Ssc_25C = [mixture.S_sc(25+273,_p) for _p in p]
-    Ssc_35C = [mixture.S_sc(35+273,_p) for _p in p]
-    Ssc_50C = [mixture.S_sc(50+273,_p) for _p in p]
+    # p = linspace(1, 10e5, 5)  #[Pa]  
+    # Ssc_25C = [mixture.S_sc(25+273,_p) for _p in p]
+    # Ssc_35C = [mixture.S_sc(35+273,_p) for _p in p]
+    # Ssc_50C = [mixture.S_sc(50+273,_p) for _p in p]
     
-    print("Ssc at 25C = ", *Ssc_25C)
-    print("Ssc at 35C = ", *Ssc_35C)
-    print("Ssc at 50C = ", *Ssc_50C)
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    ax.plot(p*1e-5,Ssc_25C,label="25C")
-    ax.plot(p*1e-5,Ssc_35C,label="35C")
-    ax.plot(p*1e-5,Ssc_50C,label="50C")
-    ax.set_xlabel("p [bar]")
-    ax.set_ylabel("S_sc [g/g]")
-    ax.legend().set_visible(True)
-    plt.show()    
+    # print("Ssc at 25C = ", *Ssc_25C)
+    # print("Ssc at 35C = ", *Ssc_35C)
+    # print("Ssc at 50C = ", *Ssc_50C)
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111)
+    # ax.plot(p*1e-5,Ssc_25C,label="25C")
+    # ax.plot(p*1e-5,Ssc_35C,label="35C")
+    # ax.plot(p*1e-5,Ssc_50C,label="50C")
+    # ax.set_xlabel("p [bar]")
+    # ax.set_ylabel("S_sc [g/g]")
+    # ax.legend().set_visible(True)
+    # plt.show()    
