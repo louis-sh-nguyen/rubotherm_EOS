@@ -385,17 +385,13 @@ class SolPolMixture:
                 if isclose(residue_float, [0.0]).all() == True:
                     x_sol = solution[0]  # [mol-sol/mol-mix]
                     omega_sol = (x_sol * MW_sol) / (x_sol * MW_sol + (1 - x_sol) * MW_pol)
-                    solubility_gg = omega_sol / (1-omega_sol)
+                    solubility_gg = omega_sol / (1-omega_sol)                    
                     return solubility_gg               
-                else:
-                    i += 1
+                
             except Exception as e:
-                print(f"Step {i+1}/{len(x0)+1}) : " + e)
-                i += 1
-                print("\tMoving to step i = ", i)        
-            # except Exception as e:
-            #     print(f"\tStep {i+1}/{len(x0)+1}: " + e)
-            # i += 1                
+                print(f"Step {i+1}/{len(x0)+1} (x0={x0[i]}): ", e)
+            
+            i += 1                
         if i >= (len(x0)):
             print("\nNo solution found for T = %g K\tP = %g Pa" % (T, P))
             print("")
@@ -771,7 +767,7 @@ if __name__ == "__main__":
     #* eps_kl
     plot_isotherm_epskl(mix, T_list=[25+273, 35+273, 50+273], P_list=linspace(1, 200e5, 20), 
                       eps_list=[276.45, 276.45*0.95, 276.45*1.05], 
-                      export_data=True)
+                      export_data=False)
     
     
     #* SW total
