@@ -23,6 +23,7 @@ import addcopyfighandler
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from matplotlib.lines import Line2D
 import re
 from colour import Color
 from numpy import *
@@ -59,6 +60,7 @@ custom_colours = [
     "olive",
     "grey",
 ]
+custom_markers = ["o", "x", "^", "*", "s", "D"]
 
 class SolPolMixture:
     """Class to store information about the sol-pol mixture
@@ -352,7 +354,7 @@ class SolPolMixture:
         rho_am = 1 / (S_a*V_s + V_p) # [g/m^3]
         return rho_am
 
-    def S_am(self, T: float, P: float):
+    def S_am(self, T: float, P: float, x0=linspace(9.0e-1, 9.99e-1, 10)):
         """Solve solubility in amorphous rubbery polymer at equilibrium.
 
         Args:
@@ -374,7 +376,6 @@ class SolPolMixture:
             _muad_s_m = _muad_m[0]      # dimensionless chemical potential of solute in sol-pol mixture
             return [_muad_s_m - muad_s_ext]
         
-        x0 = linspace(9.90e-1, 9.99e-1, 10) 
         i = 0
         while i < (len(x0)):
             try:
@@ -385,14 +386,16 @@ class SolPolMixture:
                     x_sol = solution[0]  # [mol-sol/mol-mix]
                     omega_sol = (x_sol * MW_sol) / (x_sol * MW_sol + (1 - x_sol) * MW_pol)
                     solubility_gg = omega_sol / (1-omega_sol)
-                    return solubility_gg
+                    return solubility_gg               
                 else:
                     i += 1
             except Exception as e:
-                print(e)
+                print(f"Step {i+1}/{len(x0)+1}) : " + e)
                 i += 1
-                print("\tMoving to step i = ", i)
-        
+                print("\tMoving to step i = ", i)        
+            # except Exception as e:
+            #     print(f"\tStep {i+1}/{len(x0)+1}: " + e)
+            # i += 1                
         if i >= (len(x0)):
             print("\nNo solution found for T = %g K\tP = %g Pa" % (T, P))
             print("")
@@ -548,7 +551,7 @@ def plot_isotherm_EOSvExp(spm, T_list:list[float], export_data:bool = False):
     if export_data == True:
         now = datetime.now()  # current time
         time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM
-        export_path = f"{data.path}/exportedData_{time_str}.xlsx"
+        export_path = f"{data.path}/PlotIsothermEOSvExp_{time_str}.xlsx"
         with pd.ExcelWriter(export_path) as writer:
             for T in T_list:
                 df[T].to_excel(writer, sheet_name=f"{T-273}C", index=False)
@@ -686,29 +689,58 @@ def plot_pmv(spm, T: float):
     ax2.legend().set_visible(True)
     plt.show()
 
-def plot_isotherm_eps(spm, T, eps_list):
-    p = linspace(1, 1e6, 10)    # [Pa]
-    solubility = {}
-    for _eps in eps_list:
-        solubility[_eps] = []
-        spm.modify_kl(_eps)        
-        print(database.get_interactions("CO2","CH2"))
-        for _p in p:
-            try:
-                _S = spm.S_sc(T, _p)                
-            except:
-                _S = None
-            solubility[_eps].append(_S)
-    print(solubility)
+def plot_isotherm_epskl(spm, T_list, P_list, eps_list,export_data=False):
     
+    solubility = []
+    _df = {}
+    df = pd.DataFrame(columns=['T [K]', 'eps_kl', 'P [Pa]', 'S_sc [g/g]'])
+    for T in T_list:
+        _T = [T for _p in P_list]
+        for eps in eps_list:
+            _eps = [eps for _p in P_list]
+            solubility= []
+            spm.modify_kl(eps)
+            for _p in P_list:
+                try:
+                    _S = spm.S_sc(T, _p)                
+                except:
+                    _S = None
+                solubility.append(_S)
+            _df=pd.DataFrame({'T [K]':_T,
+                              'eps_kl':_eps,
+                              'P [Pa]':P_list,
+                              'S_sc [g/g]':solubility})
+            df = pd.concat([df,_df],ignore_index=True)
+    print(df)
+    
+    if export_data == True:
+        now = datetime.now()  # current time
+        time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM
+        path = os.path.dirname(__file__)
+        export_path = f"{path}/PlotIsothermEps_{time_str}.xlsx"
+        with pd.ExcelWriter(export_path) as writer:
+            df.to_excel(writer, index=False)
+        print("Data successfully exported to: ", export_path)
+        
     fig = plt.figure()
     ax = fig.add_subplot(111)
-    for _eps in eps_list:
-        ax.plot(p*1e-5, solubility[_eps], color=custom_colours[0],linestyle="None", marker="None", label=f"{T-273}°C eps={_eps}")
+    for i, T in enumerate(T_list):
+        for j, eps in enumerate(eps_list):
+            mask = (df['T [K]'] == T) & (df['eps_kl'] == eps)
+            ax.plot(df[mask]['P [Pa]']*1e-5, df[mask]['S_sc [g/g]'], color=custom_colours[i+1], linestyle="solid", marker=custom_markers[j], label=f"{T-273}°C eps={eps}")
     ax.set_xlabel("P [bar]")
     ax.set_ylabel("S [g/g]")
+    ax.set_yscale('log')
     ax.tick_params(direction="in")
-    ax.legend().set_visible(True)
+    
+    # Legends
+    legend_markers = [Line2D([0], [0], linestyle="None", marker=custom_markers[i], color="black",
+                             label=f"eps = {eps}") for i, eps in enumerate(eps_list)]
+    legend_colours = [Line2D([0], [0], marker="None", color=custom_colours[i+1],
+                             label=f"T = {T-273}°C") for i, T in enumerate(T_list)]
+    legend = legend_colours + legend_markers
+    ax.legend(handles=legend)
+    
     plt.show()
 
 
@@ -736,7 +768,10 @@ if __name__ == "__main__":
     # print("rho_am = ", mix.rho_am(35+273,1e5), " g/m^3")
     # print("SwR = ", mix.SwellingRatio(25+273,1e5), " cm^3/cm^3")
     # plot_pmv(mix, 50+273)
-    plot_isotherm_eps(mix, 25+273, range(100,300,50))
+    #* eps_kl
+    plot_isotherm_epskl(mix, T_list=[25+273, 35+273, 50+273], P_list=linspace(1, 200e5, 20), 
+                      eps_list=[276.45, 276.45*0.95, 276.45*1.05], 
+                      export_data=True)
     
     
     #* SW total
