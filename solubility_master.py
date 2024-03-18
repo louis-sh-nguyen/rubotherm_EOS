@@ -12,8 +12,8 @@ warnings.simplefilter("ignore", category=NumbaDeprecationWarning)
 warnings.simplefilter("ignore", category=NumbaPendingDeprecationWarning)
 warnings.filterwarnings("ignore")
 
-from sgtpy_NETGP import component, mixture, saftgammamie
-# from sgtpy import component, mixture, saftgammamie
+from sgtpy_NETGP import component, mixture, saftgammamie, database
+# from sgtpy import component, mixture, saftgammamie, database
 
 import math
 import os
@@ -23,12 +23,12 @@ import addcopyfighandler
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-import re
+from matplotlib.lines import Line2D
 from colour import Color
 from numpy import *
 import pandas as pd
-from scipy.optimize import curve_fit, fsolve
-from scipy.integrate import quad
+from scipy.optimize import curve_fit, fsolve, minimize_scalar
+
 
 
 # Plotting master configuration
@@ -46,19 +46,8 @@ matplotlib.rcParams["grid.linestyle"] = "-."
 matplotlib.rcParams["grid.linewidth"] = 0.15  # in point units
 matplotlib.rcParams["figure.autolayout"] = True
 
-custom_colours = [
-    "black",
-    "green",
-    "blue",
-    "red",
-    "purple",
-    "orange",
-    "brown",
-    "plum",
-    "indigo",
-    "olive",
-    "grey",
-]
+custom_colours = ["black","green","blue","red","purple","orange","brown","plum","indigo","olive","grey"]
+custom_markers = ["o", "x", "^", "*", "s", "D"]
 
 class SolPolMixture:
     """Class to store information about the sol-pol mixture
@@ -92,59 +81,52 @@ class SolPolMixture:
         MWsolute = {"CO2": 44}  # [g/mol]
         MW_sol = MWsolute[sol]
         self.MW_sol = MW_sol
-        
-        if pol != None:
-            if pol in {"PE","HDPE"} :
-                pol_obj = component(GC={"CH2": 2*n_monomer})
-            # Create Create SAFT-g Mie EOS object of pure polymer
-            pol_obj.saftgammamie()
-            eos_pol = saftgammamie(pol_obj, compute_critical=False)
-            self.eos_pol = eos_pol
-        
-        if sol != None:
-            if sol == "CO2":
-                sol_obj = component(GC={"CO2": 1})
-            # Create Create SAFT-g Mie EOS object of pure solute
-            sol_obj.saftgammamie()
-            eos_sol = saftgammamie(sol_obj)
-            self.eos_sol = eos_sol
-        
-        if sol != None and pol != None:
-            # mixture object
-            mix_obj = mixture(sol_obj, pol_obj)
-            # Create SAFT-g Mie EOS object of Mixture
-            mix_obj.saftgammamie()
-            eos_mix = saftgammamie(mix_obj, compute_critical=False)
-            self.eos_mix = eos_mix
+
     
-    # @property
-    # def eos_sol(self):
-    #     if self.sol != None:
-    #         if self.sol == "CO2":
-    #             sol_obj = component(GC={"CO2": 1})
-    #         # Create Create SAFT-g Mie EOS object of pure solute
-    #         sol_obj.saftgammamie()
-    #         eos_sol = saftgammamie(sol_obj)            
-    #     return eos_sol
-    # @property
-    # def eos_pol(self):
-    #     if self.pol != None:
-    #         if self.pol in {"PE","HDPE"} :
-    #             pol_obj = component(GC={"CH2": 2*self.n_monomer})
-    #         # Create Create SAFT-g Mie EOS object of pure polymer
-    #         pol_obj.saftgammamie()
-    #         eos_pol = saftgammamie(pol_obj, compute_critical=False)            
-    #     return self.eos_pol    
-    # @property
-    # def eos_mix(self):
-    #     if self.sol != None and self.pol != None:
-    #         # mixture object
-    #         mix_obj = mixture(self.sol_obj, self.pol_obj)
-    #         # Create SAFT-g Mie EOS object of Mixture
-    #         mix_obj.saftgammamie()
-    #         eos_mix = saftgammamie(mix_obj, compute_critical=False)
-    #         self.eos_mix = eos_mix
-    #     return self._eos_mix
+    @property
+    def sol_obj(self):
+        if self.sol != None:
+            if self.sol == "CO2":
+                _sol_obj = component(GC={"CO2": 1})
+        return _sol_obj
+    
+    @property
+    def pol_obj(self):
+        if self.pol != None:
+            if self.pol in {"PE","HDPE"} :
+                _pol_obj = component(GC={"CH2": 2*self.n_monomer})
+        return _pol_obj
+    
+    @property
+    def mix_obj(self):
+        if self.sol != None and self.pol != None:
+            _mix_obj = self.sol_obj + self.pol_obj
+        return _mix_obj
+    
+    @property
+    def eos_sol(self):
+        # Create Create SAFT-g Mie EOS object of pure solute
+        sol_obj = self.sol_obj
+        sol_obj.saftgammamie()
+        _eos_sol = saftgammamie(sol_obj)
+        return _eos_sol
+    
+    @property
+    def eos_pol(self):
+        # Create Create SAFT-g Mie EOS object of pure polymer
+        pol_obj = self.pol_obj
+        pol_obj.saftgammamie()
+        _eos_pol = saftgammamie(pol_obj, compute_critical=False)
+        return _eos_pol
+    
+    @property
+    def eos_mix(self):
+        # Create SAFT-g Mie EOS object of Mixture
+        mix_obj = self.mix_obj
+        mix_obj.saftgammamie()
+        _eos_mix = saftgammamie(mix_obj, compute_critical=False)            
+        return _eos_mix    
+
     
     def muad_sol_ext(self, T: float, P: float):
         eos_sol = self.eos_sol
@@ -230,10 +212,10 @@ class SolPolMixture:
         
         if isclose(P, self.eos_mix.pressure(x,rhoL,T), P*0.01):
             rho = rhoL
-            print("Use rhoL")
+            # print("Use rhoL")
         elif isclose(P, self.eos_mix.pressure(x,rhoV,T), P*0.01):
             rho = rhoV
-            print("Use rhoV")
+            # print("Use rhoV")
         
         return rho
 
@@ -288,6 +270,47 @@ class SolPolMixture:
         
         return dV_dnp / self.MW_pol # [m^3/g]
     
+    def Vs_Vp_pmv1(self, T: float, P: float):
+        """Function to calculate partial volume of solute in mixture, using solubility composition.
+        Unit = [m3/g]
+
+        Args:
+            T (float): temperature [K].
+            P (float): pressure [Pa].
+        """
+        S_a = self.S_am(T, P)  # [g/g]    
+        omega_p = 1/(S_a+1)     # [g/g]
+        omega_s = 1 - omega_p   # [g/g]
+        x_s = (omega_s/self.MW_sol) / (omega_s/self.MW_sol + omega_p/self.MW_pol)   #[mol/mol]
+        x_p = 1 - x_s   #[mol/mol]           
+        x = hstack([x_s, x_p])   # [mol/mol]        
+        V_s = self.V_sol(x, T, P)  # [m^3/g]        
+        V_p = self.V_pol(x, T, P)  # [m^3/g]
+        return V_s, V_p
+    
+    def Vs_Vp_pmv2(self, T: float, P: float):
+        """Function to calculate partial volume of solute in mixture, assuming Vs and Vp same as specific volume at __infinitely dilution__.
+        Unit = [m3/g]
+
+        Args:
+            T (float): temperature [K].
+            P (float): pressure [Pa].
+        """
+        V_s = self.V_sol(hstack([0., 1.]), T, P)  # [m^3/g]        
+        V_p = self.V_pol(hstack([0., 1.]), T, P)  # [m^3/g]
+        return V_s, V_p
+    
+    def Vs_Vp_pmv3(self, T: float):
+        """Function to calculate partial volume of solute in mixture, assuming Vs and Vp at __infinitely dilution__, unchanged at atmospheric pressure.
+        Unit = [m3/g]
+
+        Args:
+            T (float): temperature [K].            
+        """
+        V_s = self.V_sol(hstack([0., 1.]), T, 1e5)  # [m^3/g]        
+        V_p = self.V_pol(hstack([0., 1.]), T, 1e5)  # [m^3/g]
+        return V_s, V_p
+    
     def rho_am(self, T: float, P: float):
         """Function to get density of amorphous domain of polymer.
         Unit = [g/m^3]
@@ -298,28 +321,19 @@ class SolPolMixture:
             pmv_method (str): method to calculate partial molar volume. Default: "1".
         """
         
-        S_a = self.S_am(T, P)  # [g/g]        
-        omega_p = 1/(S_a+1)     # [g/g]
-        omega_s = 1 - omega_p   # [g/g]
-        x_s = (omega_s/self.MW_sol) / (omega_s/self.MW_sol + omega_p/self.MW_pol)   #[mol/mol]
-        x_p = 1 - x_s   #[mol/mol]           
-        x = hstack([x_s, x_p])   # [mol/mol]        
-        print("x = ", *x)
+        S_a = self.S_am(T, P)  # [g/g]
         
         #* METHOD 1: Evaluate Vs and Vp at each composition, most robust
         if self.pmv_method == "1":
-            V_s = self.V_sol(x, T, P)  # [m^3/g]        
-            V_p = self.V_pol(x, T, P)  # [m^3/g]
+            V_s, V_p =  self.Vs_Vp_pmv1(T, P)            
         
         #* METHOD 2: Assuming Vs and Vp same as specific volume at __infinitely dilution__ 
         if self.pmv_method == "2":
-            V_s = self.V_sol(hstack([0., 1.]), T, P)  # [m^3/g]        
-            V_p = self.V_pol(hstack([0., 1.]), T, P)  # [m^3/g]
+            V_s, V_p =  self.Vs_Vp_pmv2(T, P)
         
         #* METHOD 3: Assuming Vs and Vp at __infinitely dilution__, unchanged at atmospheric pressure, least robust
         if self.pmv_method == "3":
-            V_s = self.V_sol(hstack([0., 1.]), T, 1e5)  # [m^3/g]        
-            V_p = self.V_pol(hstack([0., 1.]), T, 1e5)  # [m^3/g]
+            V_s, V_p =  self.Vs_Vp_pmv3(T)
         
         print(f"Vs at {T}K and {P} Pa = ", V_s)
         print(f"Vp at {T}K and {P} Pa = ", V_p)
@@ -327,7 +341,7 @@ class SolPolMixture:
         rho_am = 1 / (S_a*V_s + V_p) # [g/m^3]
         return rho_am
 
-    def S_am(self, T: float, P: float):
+    def S_am(self, T: float, P: float, x0=linspace(9.0e-1, 9.99e-1, 10)):
         """Solve solubility in amorphous rubbery polymer at equilibrium.
 
         Args:
@@ -338,17 +352,17 @@ class SolPolMixture:
         MW_pol = self.MW_pol
         # chemical potential of external gas (EQ)
         muad_s_ext = self.muad_sol_ext(T, P)
-        
+        eos_mix = self.eos_mix
+                
         # sol-pol mixture (EQ)
         def func(_x_1):
             _x = hstack([_x_1, 1 - _x_1])  # [mol/mol-mix]
-            _rhol = self.eos_mix.density(_x, T, P, "L")  # *
+            _rhol = eos_mix.density(_x, T, P, "L")  
             _rho_i = _x * _rhol  # [mol/m^3-mix]
-            _muad_m = self.eos_mix.muad(_rho_i, T)  # dimensionless [mu/RT]
+            _muad_m = eos_mix.muad(_rho_i, T)  # dimensionless [mu/RT]
             _muad_s_m = _muad_m[0]      # dimensionless chemical potential of solute in sol-pol mixture
             return [_muad_s_m - muad_s_ext]
         
-        x0 = linspace(9.90e-1, 9.99e-1, 10) 
         i = 0
         while i < (len(x0)):
             try:
@@ -358,18 +372,17 @@ class SolPolMixture:
                 if isclose(residue_float, [0.0]).all() == True:
                     x_sol = solution[0]  # [mol-sol/mol-mix]
                     omega_sol = (x_sol * MW_sol) / (x_sol * MW_sol + (1 - x_sol) * MW_pol)
-                    solubility_gg = omega_sol / (1-omega_sol)
-                    return solubility_gg
-                else:
-                    i += 1
+                    solubility_gg = omega_sol / (1-omega_sol)                    
+                    return solubility_gg               
+                
             except Exception as e:
-                print(e)
-                i += 1
-                print("\tMoving to step i = ", i)
-        
+                print(f"Step {i+1}/{len(x0)+1} (x0={x0[i]}): ", e)
+            
+            i += 1                
         if i >= (len(x0)):
-            print("\nNo solution found for T = %g K\tP = %g" % (T - 273, P))
-            print("")                
+            print("\nNo solution found for T = %g K\tP = %g Pa" % (T, P))
+            print("")
+            return None
 
     def S_sc(self, T: float, P: float):
         """Function to calculate overall solubility of sol in pol, adjsuted for omega_cr.
@@ -433,6 +446,13 @@ class SolPolMixture:
         
         SR_a = (self.rho_am(T, 1) / self.rho_am(T,P) * (1 + self.S_am(T,P))) - 1
         return SR_a
+
+    def modify_kl(self, eps, lr='CR'):
+        
+        if self.sol == "CO2" and (self.pol == "HDPE" or self.pol == "PE"):
+            database.new_interaction_mie("CO2", "CH2", eps, lr, overwrite=True)
+    
+
     
 class SolPolExpData():
     def __init__(self, sol: str, pol: str):
@@ -469,6 +489,31 @@ class SolPolExpData():
         df = pd.read_excel(self.file, sheet_name=f"{T-273}C")
         return df
 
+def fit_epskl(spm, T, x0, epskl_bounds):
+    
+    
+    data = SolPolExpData(spm.sol, spm.pol)
+    _df=data.get_sorption_data(T)
+    
+    def fobj(var):
+        eps = var
+        spm.modify_kl(eps)
+        # Calculate swelling ratio from SAFT
+        SwR_SAFT = [spm.SwellingRatio(T,_p) for _p in _df["P[bar]"]*1e5]
+        # Experimental sorption WITH swelling correction
+        S_exp_SW = (_df["MP1*[g]"]-data.m_met_filled+_df["ρ[g/cc]"]*(data.Vs*(1+ SwR_SAFT )+data.Vbasket)) / data.ms
+        
+        # Sorption prediction from SAFT
+        S_SAFT = [spm.S_sc(T,_p) for _p in _df["P[bar]"]*1e5]
+        return sum((S_SAFT - S_exp_SW)**2)
+    
+    result = minimize_scalar(fobj, x0, method='bounded', bounds=epskl_bounds)
+    
+    print("Optimised value of eps: ", result.x)
+    print("Objective function value at optimised: ", fobj(result.x))
+    
+
+    
 def plot_isotherm_EOSvExp(spm, T_list:list[float], export_data:bool = False):
     """Function to plot sorption of EOS and experimental data (not corrected for swelling).
 
@@ -514,7 +559,7 @@ def plot_isotherm_EOSvExp(spm, T_list:list[float], export_data:bool = False):
     if export_data == True:
         now = datetime.now()  # current time
         time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM
-        export_path = f"{data.path}/exportedData_{time_str}.xlsx"
+        export_path = f"{data.path}/PlotIsothermEOSvExp_{time_str}.xlsx"
         with pd.ExcelWriter(export_path) as writer:
             for T in T_list:
                 df[T].to_excel(writer, sheet_name=f"{T-273}C", index=False)
@@ -555,6 +600,7 @@ def plot_isotherm_pmv(spm, T_list:list[float], export_data:bool = False):
         # Sorption without swelling correction
         S_exp_woSW = (_df["MP1*[g]"]-data.m_met_filled+_df["ρ[g/cc]"]*(data.Vs+data.Vbasket)) / data.ms
         _df['S_exp_woSW[g/g]']=S_exp_woSW
+        
         # Calculate swelling ratio from SAFT using pmv 1
         spm.pmv_method = "1"
         SwR_SAFT_pmv1 = [spm.SwellingRatio(T,_p) for _p in _df["P[bar]"]*1e5]
@@ -616,36 +662,221 @@ def plot_isotherm_pmv(spm, T_list:list[float], export_data:bool = False):
     ax.legend().set_visible(True)
     plt.show()
 
+def plot_pmv(spm, T: float):
+    """Function to plot partial molar volume isotherms.
 
+    Args:
+        spm (class object): class object representing the sol-pol mixture.
+        T_list (float): temperature list [K].
+        export_data (bool, optional): export data. Defaults to False.
+    """
+    data = SolPolExpData(spm.sol, spm.pol)    
+    _df=data.get_sorption_data(T)
+    p = linspace(1, _df["P[bar]"].tolist()[-1]*1e5, 10) #[Pa]
+    Vs_pmv1, Vp_pmv1 = zip(*[spm.Vs_Vp_pmv1(T, _p) for _p in p])
+    Vs_pmv2, Vp_pmv2 = zip(*[spm.Vs_Vp_pmv2(T, _p) for _p in p])
+    Vs_pmv3, Vp_pmv3 = zip(*[spm.Vs_Vp_pmv3(T) for _p in p])
+        
+    fig = plt.figure(figsize=[4.0, 7])
+    ax1 = fig.add_subplot(211)
+    ax1.plot(p*1e-5,Vs_pmv1, color=custom_colours[1], linestyle="solid", marker="None", label=f"{T-273}°C pmv1")
+    ax1.plot(p*1e-5,Vs_pmv2, color=custom_colours[2], linestyle="solid", marker="None", label=f"{T-273}°C pmv2")
+    ax1.plot(p*1e-5,Vs_pmv3, color=custom_colours[3], linestyle="solid", marker="None", label=f"{T-273}°C pmv3")
+    ax1.set_xlabel("P [bar]")
+    ax1.set_ylabel(r"$V_{sol}$ [$m^{3}/g$]")
+    ax1.tick_params(direction="in")
+    ax1.legend().set_visible(True)
     
+    ax2 = fig.add_subplot(212)
+    ax2.plot(p*1e-5,Vp_pmv1, color=custom_colours[1], linestyle="solid", marker="None", label=f"{T-273}°C pmv1")
+    ax2.plot(p*1e-5,Vp_pmv2, color=custom_colours[2], linestyle="solid", marker="None", label=f"{T-273}°C pmv2")
+    ax2.plot(p*1e-5,Vp_pmv3, color=custom_colours[3], linestyle="solid", marker="None", label=f"{T-273}°C pmv3")
+    ax2.set_xlabel("P [bar]")
+    ax2.set_ylabel(r"$V_{pol}$ [$m^{3}/g$]")
+    ax2.tick_params(direction="in")
+    ax2.legend().set_visible(True)
+    plt.show()
+
+def plot_isotherm_epskl_EOS(spm, T_list, P_list, eps_list,export_data=False):
+    
+    solubility = []
+    _df = {}
+    df = pd.DataFrame(columns=['T [K]', 'eps_kl', 'P [Pa]', 'S_sc [g/g]'])
+    for T in T_list:
+        _T = [T for _p in P_list]
+        for eps in eps_list:
+            _eps = [eps for _p in P_list]
+            solubility= []
+            spm.modify_kl(eps)
+            for _p in P_list:
+                try:
+                    _S = spm.S_sc(T, _p)
+                except:
+                    _S = None
+                solubility.append(_S)
+            _df=pd.DataFrame({'T [K]':_T,
+                              'eps_kl':_eps,
+                              'P [Pa]':P_list,
+                              'S_sc [g/g]':solubility})
+            df = pd.concat([df,_df],ignore_index=True)
+    print(df)
+    
+    if export_data == True:
+        now = datetime.now()  # current time
+        time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM
+        path = os.path.dirname(__file__)
+        export_path = f"{path}/PlotIsothermEps_{time_str}.xlsx"
+        with pd.ExcelWriter(export_path) as writer:
+            df.to_excel(writer, index=False)
+        print("Data successfully exported to: ", export_path)
+        
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    for i, T in enumerate(T_list):
+        for j, eps in enumerate(eps_list):
+            mask = (df['T [K]'] == T) & (df['eps_kl'] == eps)
+            ax.plot(df[mask]['P [Pa]']*1e-5, df[mask]['S_sc [g/g]'], color=custom_colours[i+1], linestyle="solid", marker=custom_markers[j], label=f"{T-273}°C eps={eps}")
+    ax.set_xlabel("P [bar]")
+    ax.set_ylabel("S [g/g]")
+    ax.set_yscale('log')
+    ax.tick_params(direction="in")
+    
+    # Legends
+    legend_markers = [Line2D([0], [0], linestyle="None", marker=custom_markers[i], color="black",
+                             label=f"eps = {eps}") for i, eps in enumerate(eps_list)]
+    legend_colours = [Line2D([0], [0], marker="None", color=custom_colours[i+1],
+                             label=f"T = {T-273}°C") for i, T in enumerate(T_list)]
+    legend = legend_colours + legend_markers
+    ax.legend(handles=legend)
+    
+    plt.show()
+
+
+def plot_isotherm_epskl_EOSvExp(spm, T_list, eps_list, export_data=False):
+    
+    data = SolPolExpData(spm.sol, spm.pol)
+    
+    solubility_SAFT = []
+    _df = {}
+    df = pd.DataFrame(columns=['T [K]', 'eps_kl', 'P [Pa]', 'S_sc_SAFT [g/g]', 'S_sc_exp_SW [g/g]'])
+    for T in T_list:
+        
+        _df1=data.get_sorption_data(T)
+        P_list = _df1["P[bar]"].values * 1e5    # [Pa]
+        _T = [T for _p in P_list]
+        for eps in eps_list:
+            _eps = [eps for _p in P_list]
+            solubility_SAFT= []
+            solubility_exp_SW= []
+            spm.modify_kl(eps)
+            for _p in P_list:
+                try:
+                    _S = spm.S_sc(T, _p)
+                except:
+                    _S = None
+                
+                try:
+                    # mask = (_df1["P[bar]"] == _p*1e-5)    
+                    mask = abs(_df1["P[bar]"]*1e5 - _p) <= (_p*0.01)
+                    _SwR = spm.SwellingRatio(T,_p)
+                    print                 
+                    _S_exp_SW = (_df1[mask]["MP1*[g]"]-data.m_met_filled+_df1[mask]["ρ[g/cc]"]*(data.Vs*(1+_SwR)+data.Vbasket)) / data.ms
+                    _S_exp_SW = _S_exp_SW.values[0]
+                except:
+                    _S_exp_SW = None
+                
+                print("Sw = ", _SwR)
+                print("S_exp_SW = ", _S_exp_SW)
+                solubility_SAFT.append(_S)
+                solubility_exp_SW.append(_S_exp_SW)
+            _df=pd.DataFrame({'T [K]':_T,
+                              'eps_kl':_eps,
+                              'P [Pa]':P_list,
+                              'S_sc_SAFT [g/g]':solubility_SAFT,
+                              'S_sc_exp_SW [g/g]':solubility_exp_SW})
+            df = pd.concat([df,_df],ignore_index=True)
+    print(df)
+    
+    if export_data == True:
+        now = datetime.now()  # current time
+        time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM
+        path = os.path.dirname(__file__)
+        export_path = f"{path}/PlotIsothermEpsEOSvExp_{time_str}.xlsx"
+        with pd.ExcelWriter(export_path) as writer:
+            df.to_excel(writer, index=False)
+        print("Data successfully exported to: ", export_path)
+        
+    fig = plt.figure(figsize=[8.0, 3.5])
+    ax1 = fig.add_subplot(121)  # SAFT only
+    ax2 = fig.add_subplot(122)  # corrected exp
+    for i, T in enumerate(T_list):
+        for j, eps in enumerate(eps_list):
+            mask = (df['T [K]'] == T) & (df['eps_kl'] == eps)
+            ax1.plot(df[mask]['P [Pa]']*1e-5, df[mask]['S_sc_SAFT [g/g]'], color=custom_colours[i+1], linestyle="solid", marker=custom_markers[j], label=f"{T-273}°C eps={eps}")
+            ax2.plot(df[mask]['P [Pa]']*1e-5, df[mask]['S_sc_exp_SW [g/g]'], color=custom_colours[i+1], linestyle="solid", marker=custom_markers[j], label=f"{T-273}°C eps={eps}")
+    for ax in ax1, ax2:
+        ax.set_xlabel("P [bar]")
+        ax.set_ylabel("S [g/g]")
+        ax.set_yscale('log')
+        ax.tick_params(direction="in")
+    ax1.set_title("SAFT prediction")
+    ax2.set_title("Experimental with swelling correction")
+    ax1.set_ylim(top=1.)
+    ax2.set_ylim(top=2.)
+    # Legends
+    legend_markers = [Line2D([0], [0], linestyle="None", marker=custom_markers[i], color="black",
+                             label=f"eps = {eps}") for i, eps in enumerate(eps_list)]
+    legend_colours = [Line2D([0], [0], marker="None", color=custom_colours[i+1],
+                             label=f"T = {T-273}°C") for i, T in enumerate(T_list)]
+    legend = legend_colours + legend_markers
+    ax2.legend(handles=legend)
+    
+    plt.show()
+
+
 if __name__ == "__main__":
     
     # data = SolPolExpData("CO2","HDPE")
     # print(data.V_met_filled)
     
-    mixture = SolPolMixture("CO2","HDPE")
-    # mixture.pmv_method="3"
-    # rho = mixture.SinglePhaseDensity(hstack([1.0, 0]), 25+273, 1e5)
+    mix = SolPolMixture("CO2","HDPE")
+    # mix.pmv_method="3"
+    # rho = mix.SinglePhaseDensity(hstack([1.0, 0]), 25+273, 1e5)
     # print("rho =", rho)
-    # print("SR = ",mixture.SwellingRatio(35+273,10e5))
-    # plot_isotherm_EOSvExp(mixture, [50+273,], export_data=False)
-    # plot_isotherm_EOSvExp(mixture,[25+273, 35+273, 50+273],export_data="True")
-    plot_isotherm_pmv(mixture, [50+273,], export_data=True)
-    # S = get_S_sc(mixture, 35+273, 1e5)
-    # rho_m = mixture.rho_mix(35+273, 1e5)
+    # print("SR = ",mix.SwellingRatio(35+273,10e5))
+    # plot_isotherm_EOSvExp(mix, [50+273,], export_data=False)
+    # plot_isotherm_EOSvExp(mix,[25+273, 35+273, 50+273],export_data="True")
+    # plot_isotherm_pmv(mix, [50+273,], export_data=True)
+    # S = mix.S_sc(35+273, 1e5)
+    # print("S = ", S)
+    # rho_m = mix.rho_mix(35+273, 1e5)
     # print(f"rho_mix = {rho_m*1e-6} g/cm^3")
-    # print("Vs = ", mixture.V_sol(hstack([0, 1]), 50+273, 1e5), " m^3/g")
-    # print("Vs = ", mixture.V_sol(hstack([0, 1]), 50+273, 1e6), " m^3/g")
-    # print("Vp = ", mixture.V_pol(hstack([0, 1]), 50+273,1e5), " m^3/g")
-    # print("Vp = ", mixture.V_pol(hstack([0, 1]), 50+273,1e6), " m^3/g")
-    # print("rho_am = ", mixture.rho_am(35+273,1e5), " g/m^3")
-    # print("SwR = ", mixture.SwellingRatio(25+273,1e5), " cm^3/cm^3")
+    # print("Vs = ", mix.V_sol(hstack([0, 1]), 50+273, 1e5), " m^3/g")
+    # print("Vs = ", mix.V_sol(hstack([0, 1]), 50+273, 1e6), " m^3/g")
+    # print("Vp = ", mix.V_pol(hstack([0, 1]), 50+273,1e5), " m^3/g")
+    # print("Vp = ", mix.V_pol(hstack([0, 1]), 50+273,1e6), " m^3/g")
+    # print("rho_am = ", mix.rho_am(35+273,1e5), " g/m^3")
+    # print("SwR = ", mix.SwellingRatio(25+273,1e5), " cm^3/cm^3")
+    # plot_pmv(mix, 50+273)
+    
+    #* eps_kl_EOS
+    # plot_isotherm_epskl_EOS(mix, T_list=[25+273, 35+273, 50+273], P_list=linspace(1, 200e5, 20), 
+    #                   eps_list=[276.45, 276.45*0.95, 276.45*1.05], 
+    #                   export_data=False)
+    
+    #* eps_kl_EOS
+    plot_isotherm_epskl_EOSvExp(mix, T_list=[25+273],
+                      eps_list=[276.45, 276.45*0.95, 276.45*1.05], 
+                      export_data=False)
+    
+    #* fit_epskl
+    # fit_epskl(mix, 25+273, 200, (50, 500))
     
     #* SW total
     # p = linspace(1,10e5,5)
-    # SwR_25C = [mixture.SwellingRatio(25+273, _p) for _p in p]
-    # SwR_35C = [mixture.SwellingRatio(35+273, _p) for _p in p]
-    # SwR_50C = [mixture.SwellingRatio(50+273, _p) for _p in p]
+    # SwR_25C = [mix.SwellingRatio(25+273, _p) for _p in p]
+    # SwR_35C = [mix.SwellingRatio(35+273, _p) for _p in p]
+    # SwR_50C = [mix.SwellingRatio(50+273, _p) for _p in p]
     # print("Swelling Ratio at 25C = ", *SwR_25C)
     # print("Swelling Ratio at 35C = ", *SwR_35C)
     # print("Swelling Ratio at 50C = ", *SwR_50C)
@@ -659,11 +890,33 @@ if __name__ == "__main__":
     # ax.legend().set_visible(True)
     # plt.show()
     
+    #* SW total with different pmv method
+    # T=25+273    # [K]
+    # p = linspace(1,10e5,5)
+    # mix.pmv_method = "1"    
+    # SwR_pmv1 = [mix.SwellingRatio(T, _p) for _p in p]
+    # mix.pmv_method = "2"
+    # SwR_pmv2 = [mix.SwellingRatio(T, _p) for _p in p]
+    # mix.pmv_method = "3"
+    # SwR_pmv3 = [mix.SwellingRatio(T, _p) for _p in p]
+    # print(f"Swelling Ratio pmv1 at {T-273}C = ", *SwR_pmv1)
+    # print(f"Swelling Ratio pmv2 at {T-273}C = ", *SwR_pmv2)
+    # print(f"Swelling Ratio pmv3 at {T-273}C = ", *SwR_pmv3)
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111)
+    # ax.plot(p*1e-5,SwR_pmv1,label="pmv1")
+    # ax.plot(p*1e-5,SwR_pmv2,label="pmv2")
+    # ax.plot(p*1e-5,SwR_pmv3,label="pmv3")
+    # ax.set_xlabel("p [bar]")
+    # ax.set_ylabel("Swelling Ratio (cm3/cm3)")
+    # ax.legend().set_visible(True)
+    # plt.show()
+    
     #* SW am
     # p = linspace(1,200e5,10)    # [Pa]
-    # SwRa_25C = [mixture.SwellingRatio_am(25+273, _p) for _p in p]
-    # SwRa_35C = [mixture.SwellingRatio_am(35+273, _p) for _p in p]
-    # SwRa_50C = [mixture.SwellingRatio_am(50+273, _p) for _p in p]
+    # SwRa_25C = [mix.SwellingRatio_am(25+273, _p) for _p in p]
+    # SwRa_35C = [mix.SwellingRatio_am(35+273, _p) for _p in p]
+    # SwRa_50C = [mix.SwellingRatio_am(50+273, _p) for _p in p]
     # fig = plt.figure()
     # ax = fig.add_subplot(111)
     # ax.plot(p*1e-5,SwRa_25C,label="25C")
@@ -675,58 +928,58 @@ if __name__ == "__main__":
     # plt.show()  
     
     #* Vm
-    p = linspace(1, 10e5, 5)  #[Pa]  
-    Vm_25C = [1/mixture.rho_mix(25+273,_p) for _p in p]
-    Vm_35C = [1/mixture.rho_mix(35+273,_p) for _p in p]
-    Vm_50C = [1/mixture.rho_mix(50+273,_p) for _p in p]
-    print("Vm at 25C = ", *Vm_25C)
-    print("Vm at 35C = ", *Vm_35C)
-    print("Vm at 50C = ", *Vm_50C)
+    # p = linspace(1, 10e5, 5)  #[Pa]  
+    # Vm_25C = [1/mix.rho_mix(25+273,_p) for _p in p]
+    # Vm_35C = [1/mix.rho_mix(35+273,_p) for _p in p]
+    # Vm_50C = [1/mix.rho_mix(50+273,_p) for _p in p]
+    # print("Vm at 25C = ", *Vm_25C)
+    # print("Vm at 35C = ", *Vm_35C)
+    # print("Vm at 50C = ", *Vm_50C)
     
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    ax.plot(p*1e-5,Vm_25C,label="25C")
-    ax.plot(p*1e-5,Vm_35C,label="35C")
-    ax.plot(p*1e-5,Vm_50C,label="50C")
-    ax.set_xlabel("p [bar]")
-    ax.set_ylabel("V_m [m3/g]")
-    ax.legend().set_visible(True)
-    plt.show()  
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111)
+    # ax.plot(p*1e-5,Vm_25C,label="25C")
+    # ax.plot(p*1e-5,Vm_35C,label="35C")
+    # ax.plot(p*1e-5,Vm_50C,label="50C")
+    # ax.set_xlabel("p [bar]")
+    # ax.set_ylabel("V_m [m3/g]")
+    # ax.legend().set_visible(True)
+    # plt.show()  
     
     # * Vam
-    p = linspace(1, 100e5, 5)  #[Pa]  
-    Va_25C = [1/mixture.rho_am(25+273,_p) for _p in p]
-    Va_35C = [1/mixture.rho_am(35+273,_p) for _p in p]
-    Va_50C = [1/mixture.rho_am(50+273,_p) for _p in p]
-    print("Va at 25C = ", *Va_25C)
-    print("Va at 35C = ", *Va_35C)
-    print("Va at 50C = ", *Va_50C)
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    ax.plot(p*1e-5,Va_25C,label="25C")
-    ax.plot(p*1e-5,Va_35C,label="35C")
-    ax.plot(p*1e-5,Va_50C,label="50C")
-    ax.set_xlabel("p [bar]")
-    ax.set_ylabel("V_am [m3/g]")
-    ax.legend().set_visible(True)
-    plt.show()
+    # p = linspace(1, 100e5, 5)  #[Pa]  
+    # Va_25C = [1/mix.rho_am(25+273,_p) for _p in p]
+    # Va_35C = [1/mix.rho_am(35+273,_p) for _p in p]
+    # Va_50C = [1/mix.rho_am(50+273,_p) for _p in p]
+    # print("Va at 25C = ", *Va_25C)
+    # print("Va at 35C = ", *Va_35C)
+    # print("Va at 50C = ", *Va_50C)
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111)
+    # ax.plot(p*1e-5,Va_25C,label="25C")
+    # ax.plot(p*1e-5,Va_35C,label="35C")
+    # ax.plot(p*1e-5,Va_50C,label="50C")
+    # ax.set_xlabel("p [bar]")
+    # ax.set_ylabel("V_am [m3/g]")
+    # ax.legend().set_visible(True)
+    # plt.show()
     
     
     # * Ssc
-    p = linspace(1, 10e5, 5)  #[Pa]  
-    Ssc_25C = [mixture.S_sc(25+273,_p) for _p in p]
-    Ssc_35C = [mixture.S_sc(35+273,_p) for _p in p]
-    Ssc_50C = [mixture.S_sc(50+273,_p) for _p in p]
+    # p = linspace(1, 10e5, 5)  #[Pa]  
+    # Ssc_25C = [mix.S_sc(25+273,_p) for _p in p]
+    # Ssc_35C = [mix.S_sc(35+273,_p) for _p in p]
+    # Ssc_50C = [mix.S_sc(50+273,_p) for _p in p]
     
-    print("Ssc at 25C = ", *Ssc_25C)
-    print("Ssc at 35C = ", *Ssc_35C)
-    print("Ssc at 50C = ", *Ssc_50C)
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    ax.plot(p*1e-5,Ssc_25C,label="25C")
-    ax.plot(p*1e-5,Ssc_35C,label="35C")
-    ax.plot(p*1e-5,Ssc_50C,label="50C")
-    ax.set_xlabel("p [bar]")
-    ax.set_ylabel("S_sc [g/g]")
-    ax.legend().set_visible(True)
-    plt.show()    
+    # print("Ssc at 25C = ", *Ssc_25C)
+    # print("Ssc at 35C = ", *Ssc_35C)
+    # print("Ssc at 50C = ", *Ssc_50C)
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111)
+    # ax.plot(p*1e-5,Ssc_25C,label="25C")
+    # ax.plot(p*1e-5,Ssc_35C,label="35C")
+    # ax.plot(p*1e-5,Ssc_50C,label="50C")
+    # ax.set_xlabel("p [bar]")
+    # ax.set_ylabel("S_sc [g/g]")
+    # ax.legend().set_visible(True)
+    # plt.show()    
