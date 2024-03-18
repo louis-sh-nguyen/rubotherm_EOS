@@ -24,11 +24,11 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.lines import Line2D
-import re
 from colour import Color
 from numpy import *
 import pandas as pd
-from scipy.optimize import curve_fit, fsolve
+from scipy.optimize import curve_fit, fsolve, minimize_scalar
+
 
 
 
@@ -47,19 +47,7 @@ matplotlib.rcParams["grid.linestyle"] = "-."
 matplotlib.rcParams["grid.linewidth"] = 0.15  # in point units
 matplotlib.rcParams["figure.autolayout"] = True
 
-custom_colours = [
-    "black",
-    "green",
-    "blue",
-    "red",
-    "purple",
-    "orange",
-    "brown",
-    "plum",
-    "indigo",
-    "olive",
-    "grey",
-]
+custom_colours = ["black","green","blue","red","purple","orange","brown","plum","indigo","olive","grey"]
 custom_markers = ["o", "x", "^", "*", "s", "D"]
 
 class SolPolMixture:
@@ -463,9 +451,7 @@ class SolPolMixture:
     def modify_kl(self, eps, lr='CR'):
         
         if self.sol == "CO2" and (self.pol == "HDPE" or self.pol == "PE"):
-            database.new_interaction_mie("CO2", "CH2", eps, lr, overwrite=True)        
-         
-
+            database.new_interaction_mie("CO2", "CH2", eps, lr, overwrite=True)
     
 class SolPolExpData():
     def __init__(self, sol: str, pol: str):
@@ -502,6 +488,31 @@ class SolPolExpData():
         df = pd.read_excel(self.file, sheet_name=f"{T-273}C")
         return df
 
+def fit_epskl(spm, T, x0, epskl_bounds):
+    
+    
+    data = SolPolExpData(spm.sol, spm.pol)
+    _df=data.get_sorption_data(T)
+    
+    def fobj(var):
+        eps = var
+        spm.modify_kl(eps)
+        # Calculate swelling ratio from SAFT
+        SwR_SAFT = [spm.SwellingRatio(T,_p) for _p in _df["P[bar]"]*1e5]
+        # Experimental sorption WITH swelling correction
+        S_exp_SW = (_df["MP1*[g]"]-data.m_met_filled+_df["ρ[g/cc]"]*(data.Vs*(1+ SwR_SAFT )+data.Vbasket)) / data.ms
+        
+        # Sorption prediction from SAFT
+        S_SAFT = [spm.S_sc(T,_p) for _p in _df["P[bar]"]*1e5]
+        return sum((S_SAFT - S_exp_SW)**2)
+    
+    result = minimize_scalar(fobj, x0, method='bounded', bounds=epskl_bounds)
+    
+    print("Optimised value of eps: ", result.x)
+    print("Objective function value at optimised: ", fobj(result.x))
+    
+
+    
 def plot_isotherm_EOSvExp(spm, T_list:list[float], export_data:bool = False):
     """Function to plot sorption of EOS and experimental data (not corrected for swelling).
 
@@ -685,7 +696,8 @@ def plot_pmv(spm, T: float):
     ax2.legend().set_visible(True)
     plt.show()
 
-def plot_isotherm_epskl(spm, T_list, P_list, eps_list,export_data=False):
+
+def plot_isotherm_epskl_EOS(spm, T_list, P_list, eps_list,export_data=False):
     
     solubility = []
     _df = {}
@@ -698,7 +710,7 @@ def plot_isotherm_epskl(spm, T_list, P_list, eps_list,export_data=False):
             spm.modify_kl(eps)
             for _p in P_list:
                 try:
-                    _S = spm.S_sc(T, _p)                
+                    _S = spm.S_sc(T, _p)
                 except:
                     _S = None
                 solubility.append(_S)
@@ -740,6 +752,93 @@ def plot_isotherm_epskl(spm, T_list, P_list, eps_list,export_data=False):
     plt.show()
 
 
+def plot_isotherm_epskl_EOSvExp(spm, T_list, eps_list, export_data=False):
+    
+    data = SolPolExpData(spm.sol, spm.pol)
+    
+    solubility_SAFT = []
+    _df = {}
+    df = pd.DataFrame(columns=['T [K]', 'eps_kl', 'P [Pa]', 'S_sc_SAFT [g/g]', 'S_sc_exp_SW [g/g]'])
+    for T in T_list:
+        
+        _df1=data.get_sorption_data(T)
+        P_list = _df1["P[bar]"].values * 1e5    # [Pa]
+        _T = [T for _p in P_list]
+        for eps in eps_list:
+            _eps = [eps for _p in P_list]
+            solubility_SAFT= []
+            solubility_exp_SW= []
+            spm.modify_kl(eps)
+            for _p in P_list:
+                try:
+                    _S = spm.S_sc(T, _p)
+                except:
+                    _S = None
+                
+                try:
+                    # mask = (_df1["P[bar]"] == _p*1e-5)    
+                    mask = abs(_df1["P[bar]"]*1e5 - _p) <= (_p*0.01)
+                    _SwR = spm.SwellingRatio(T,_p)
+                    print                 
+                    _S_exp_SW = (_df1[mask]["MP1*[g]"]-data.m_met_filled+_df1[mask]["ρ[g/cc]"]*(data.Vs*(1+_SwR)+data.Vbasket)) / data.ms
+                    _S_exp_SW = _S_exp_SW.values[0]
+                except:
+                    _S_exp_SW = None
+                
+                print("Sw = ", _SwR)
+                print("S_exp_SW = ", _S_exp_SW)
+                solubility_SAFT.append(_S)
+                solubility_exp_SW.append(_S_exp_SW)
+            _df=pd.DataFrame({'T [K]':_T,
+                              'eps_kl':_eps,
+                              'P [Pa]':P_list,
+                              'S_sc_SAFT [g/g]':solubility_SAFT,
+                              'S_sc_exp_SW [g/g]':solubility_exp_SW})
+            df = pd.concat([df,_df],ignore_index=True)
+    print(df)
+    
+
+    if export_data == True:
+        now = datetime.now()  # current time
+        time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM
+        path = os.path.dirname(__file__)
+
+        export_path = f"{path}/PlotIsothermEpsEOSvExp_{time_str}.xlsx"
+
+        with pd.ExcelWriter(export_path) as writer:
+            df.to_excel(writer, index=False)
+        print("Data successfully exported to: ", export_path)
+        
+
+    fig = plt.figure(figsize=[8.0, 3.5])
+    ax1 = fig.add_subplot(121)  # SAFT only
+    ax2 = fig.add_subplot(122)  # corrected exp
+    for i, T in enumerate(T_list):
+        for j, eps in enumerate(eps_list):
+            mask = (df['T [K]'] == T) & (df['eps_kl'] == eps)
+            ax1.plot(df[mask]['P [Pa]']*1e-5, df[mask]['S_sc_SAFT [g/g]'], color=custom_colours[i+1], linestyle="solid", marker=custom_markers[j], label=f"{T-273}°C eps={eps}")
+            ax2.plot(df[mask]['P [Pa]']*1e-5, df[mask]['S_sc_exp_SW [g/g]'], color=custom_colours[i+1], linestyle="solid", marker=custom_markers[j], label=f"{T-273}°C eps={eps}")
+    for ax in ax1, ax2:
+        ax.set_xlabel("P [bar]")
+        ax.set_ylabel("S [g/g]")
+        ax.set_yscale('log')
+        ax.tick_params(direction="in")
+    ax1.set_title("SAFT prediction")
+    ax2.set_title("Experimental with swelling correction")
+    ax1.set_ylim(top=1.)
+    ax2.set_ylim(top=2.)
+
+    # Legends
+    legend_markers = [Line2D([0], [0], linestyle="None", marker=custom_markers[i], color="black",
+                             label=f"eps = {eps}") for i, eps in enumerate(eps_list)]
+    legend_colours = [Line2D([0], [0], marker="None", color=custom_colours[i+1],
+                             label=f"T = {T-273}°C") for i, T in enumerate(T_list)]
+    legend = legend_colours + legend_markers
+
+    ax2.legend(handles=legend)    
+    plt.show()
+
+
 if __name__ == "__main__":
     
     # data = SolPolExpData("CO2","HDPE")
@@ -764,11 +863,20 @@ if __name__ == "__main__":
     # print("rho_am = ", mix.rho_am(35+273,1e5), " g/m^3")
     # print("SwR = ", mix.SwellingRatio(25+273,1e5), " cm^3/cm^3")
     # plot_pmv(mix, 50+273)
-    #* eps_kl
-    plot_isotherm_epskl(mix, T_list=[25+273, 35+273, 50+273], P_list=linspace(1, 200e5, 20), 
+    
+    #* eps_kl_EOS
+    # plot_isotherm_epskl_EOS(mix, T_list=[25+273, 35+273, 50+273], P_list=linspace(1, 200e5, 20), 
+    #                   eps_list=[276.45, 276.45*0.95, 276.45*1.05], 
+    #                   export_data=False)
+    
+    #* eps_kl_EOS
+    plot_isotherm_epskl_EOSvExp(mix, T_list=[25+273],
                       eps_list=[276.45, 276.45*0.95, 276.45*1.05], 
                       export_data=False)
     
+    #* fit_epskl
+    # fit_epskl(mix, 25+273, 200, (50, 500))
+
     
     #* SW total
     # p = linspace(1,10e5,5)
