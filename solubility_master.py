@@ -31,6 +31,7 @@ from scipy.optimize import curve_fit, fsolve, minimize_scalar
 
 
 
+
 # Plotting master configuration
 matplotlib.rcParams["figure.figsize"] = [4.0, 3.5]  # in inches
 matplotlib.rcParams["mathtext.default"] = "regular"  # same as regular text
@@ -452,8 +453,6 @@ class SolPolMixture:
         if self.sol == "CO2" and (self.pol == "HDPE" or self.pol == "PE"):
             database.new_interaction_mie("CO2", "CH2", eps, lr, overwrite=True)
     
-
-    
 class SolPolExpData():
     def __init__(self, sol: str, pol: str):
         self.sol = sol
@@ -697,6 +696,7 @@ def plot_pmv(spm, T: float):
     ax2.legend().set_visible(True)
     plt.show()
 
+
 def plot_isotherm_epskl_EOS(spm, T_list, P_list, eps_list,export_data=False):
     
     solubility = []
@@ -797,15 +797,19 @@ def plot_isotherm_epskl_EOSvExp(spm, T_list, eps_list, export_data=False):
             df = pd.concat([df,_df],ignore_index=True)
     print(df)
     
+
     if export_data == True:
         now = datetime.now()  # current time
         time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM
         path = os.path.dirname(__file__)
+
         export_path = f"{path}/PlotIsothermEpsEOSvExp_{time_str}.xlsx"
+
         with pd.ExcelWriter(export_path) as writer:
             df.to_excel(writer, index=False)
         print("Data successfully exported to: ", export_path)
         
+
     fig = plt.figure(figsize=[8.0, 3.5])
     ax1 = fig.add_subplot(121)  # SAFT only
     ax2 = fig.add_subplot(122)  # corrected exp
@@ -823,14 +827,15 @@ def plot_isotherm_epskl_EOSvExp(spm, T_list, eps_list, export_data=False):
     ax2.set_title("Experimental with swelling correction")
     ax1.set_ylim(top=1.)
     ax2.set_ylim(top=2.)
+
     # Legends
     legend_markers = [Line2D([0], [0], linestyle="None", marker=custom_markers[i], color="black",
                              label=f"eps = {eps}") for i, eps in enumerate(eps_list)]
     legend_colours = [Line2D([0], [0], marker="None", color=custom_colours[i+1],
                              label=f"T = {T-273}°C") for i, T in enumerate(T_list)]
     legend = legend_colours + legend_markers
-    ax2.legend(handles=legend)
-    
+
+    ax2.legend(handles=legend)    
     plt.show()
 
 
@@ -871,6 +876,7 @@ if __name__ == "__main__":
     
     #* fit_epskl
     # fit_epskl(mix, 25+273, 200, (50, 500))
+
     
     #* SW total
     # p = linspace(1,10e5,5)
