@@ -427,9 +427,10 @@ class DetailedSolPol(BaseSolPol):
             x0_list = x0_sol_range
         else:
             x0_list = [x0_sol_single]
-            
-        for i, x0 in enumerate(x0_list):
-            
+        
+        print("\n")
+        print(f"T = {T} K, P = {P} Pa")
+        for i, x0 in enumerate(x0_list):            
             try:
                 solution = fsolve(func, x0=float(x0_list[i]))
                 residue = func(_x_1=solution)
@@ -669,7 +670,7 @@ def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False
         _df['S_SAFT[g/g]'] = S_SAFT_pexp
         
         df[T] = _df
-        print("\n \n")
+        print("")
         print("T = ", T)
         print(df[T])
         print("")
@@ -695,7 +696,7 @@ def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False
     ax.legend().set_visible(True)
     plt.show()
 
-def plot_isotherm_pmv(spm, T_list:list[float], export_data:bool = False):
+def plot_isotherm_pmv(base_obj, T_list:list[float], export_data:bool = False):
     """Function to plot sorption of EOS and experimental data to compare different partial molar volume approaches.
 
     Args:
@@ -704,75 +705,101 @@ def plot_isotherm_pmv(spm, T_list:list[float], export_data:bool = False):
         P (float): pressure [Pa].
         export_data (bool): export data.
     """
-    data = SolPolExpData(spm.sol, spm.pol)
+    data = SolPolExpData(base_obj.sol, base_obj.pol)
     
-    df={}    
+    df = pd.DataFrame()
+    df_SAFT = pd.DataFrame(columns=['T [K]', 'P [Pa]', 'S_sc_pmv1 [g/g]', 'S_sc_pmv2 [g/g]', 'S_sc_pmv3 [g/g]'])
     P_SAFT={}
-
-    S_SAFT_pmv1={}
-    S_SAFT_pmv2={}
-    S_SAFT_pmv3={}
+    S_SAFT_pmv={}
+    
     for i, T in enumerate(T_list):
         _df=data.get_sorption_data(T)
+        
         # Sorption without swelling correction
         S_exp_woSW = (_df["MP1*[g]"]-data.m_met_filled+_df["ρ[g/cc]"]*(data.Vs+data.Vbasket)) / data.ms
-        _df['S_exp_woSW[g/g]']=S_exp_woSW
+        _df['S_NoCorrection[g/g]'] = S_exp_woSW
         
-        # Calculate swelling ratio from SAFT using pmv 1
-        spm.pmv_method = "1"
-        SwR_SAFT_pmv1 = [spm.SwellingRatio(T,_p) for _p in _df["P[bar]"]*1e5]
-        _df['SwR_SAFT_pmv1[cc/cc]'] = SwR_SAFT_pmv1        
-        S_exp_SW_pmv1 = (_df["MP1*[g]"]-data.m_met_filled+_df["ρ[g/cc]"]*(data.Vs*(1+_df['SwR_SAFT_pmv1[cc/cc]'])+data.Vbasket)) / data.ms
-        _df['S_exp_SW_pmv1[g/g]'] = S_exp_SW_pmv1
-        P_SAFT[T] = linspace(_df["P[bar]"].values[0],_df["P[bar]"].values[-1], 30) * 1e5   # [Pa]
-        S_SAFT_pmv1[T] = [spm.S_sc(T,_p) for _p in P_SAFT[T]]
-        _S_SAFT_pmv1 = [spm.S_sc(T,_p) for _p in _df["P[bar]"]*1e5]
-        _df['S_SAFT_pmv1[g/g]'] = _S_SAFT_pmv1
+        # Iterate through each pmv method
+        for k in "1", "2", "3":
+            base_obj.pmv_method = k
+            
+            # Calculate swelling ratio from SAFT at pmv
+            objects = []
+            SwR_SAFT_pmv = []
+            for j, _p in enumerate(_df["P[bar]"].values *1e5):
+                if j == 0:
+                    obj = DetailedSolPol(base_obj, T, _p,)                
+                else:
+                    x0_list = update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
+                    obj = DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list,)
+                objects.append(obj)
+                SwR_SAFT_pmv.append(obj.SwellingRatio)                    
+            _df[f'SwR_SAFT_pmv{k}[cc/cc]'] = SwR_SAFT_pmv
         
-        # Calculate swelling ratio from SAFT using pmv 2
-        spm.pmv_method = "2"
-        SwR_SAFT_pmv2 = [spm.SwellingRatio(T,_p) for _p in _df["P[bar]"]*1e5]
-        _df['SwR_SAFT_pmv2[cc/cc]'] = SwR_SAFT_pmv2
-        S_exp_SW_pmv2 = (_df["MP1*[g]"]-data.m_met_filled+_df["ρ[g/cc]"]*(data.Vs*(1+_df['SwR_SAFT_pmv2[cc/cc]'])+data.Vbasket)) / data.ms
-        _df['S_exp_SW_pmv2[g/g]'] = S_exp_SW_pmv2                
-        S_SAFT_pmv2[T] = [spm.S_sc(T,_p) for _p in P_SAFT[T]]
-        _S_SAFT_pmv2 = [spm.S_sc(T,_p) for _p in _df["P[bar]"]*1e5]
-        _df['S_SAFT_pmv2[g/g]'] = _S_SAFT_pmv2
+            # Calculate corrected sorption from exp
+            S_exp_SW_pmv = (_df["MP1*[g]"]-data.m_met_filled+_df["ρ[g/cc]"]*(data.Vs*(1+_df[f'SwR_SAFT_pmv{k}[cc/cc]'])+data.Vbasket)) / data.ms
+            _df[f'S_Corrected_pmv{k}[g/g]'] = S_exp_SW_pmv
         
-        # Calculate swelling ratio from SAFT using pmv 3
-        spm.pmv_method = "3"
-        SwR_SAFT_pmv3 = [spm.SwellingRatio(T,_p) for _p in _df["P[bar]"]*1e5]
-        _df['SwR_SAFT_pmv3[cc/cc]'] = SwR_SAFT_pmv3
-        S_exp_SW_pmv3 = (_df["MP1*[g]"]-data.m_met_filled+_df["ρ[g/cc]"]*(data.Vs*(1+_df['SwR_SAFT_pmv3[cc/cc]'])+data.Vbasket)) / data.ms
-        _df['S_exp_SW_pmv3[g/g]'] = S_exp_SW_pmv3                
-        S_SAFT_pmv3[T] = [spm.S_sc(T,_p) for _p in P_SAFT[T]]
-        _S_SAFT_pmv3 = [spm.S_sc(T,_p) for _p in _df["P[bar]"]*1e5]
-        _df['S_SAFT_pmv3[g/g]'] = _S_SAFT_pmv3
-        df[T] = _df
-        print("\n \n")
-        print("T = ", T)
-        print(df[T])    
-        print("")
+            # Calculates sorption from SAFT prediction at exp pressure data
+            objects = []
+            S_SAFT_pmv_pexp = []
+            for j, _p in enumerate(_df["P[bar]"].values *1e5):
+                if j == 0:
+                    obj = DetailedSolPol(base_obj, T, _p,)                
+                else:
+                    x0_list = update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
+                    obj = DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list,)
+                objects.append(obj)
+                S_SAFT_pmv_pexp.append(obj.S_sc)
+            _df[f'S_SAFT_pmv{k}[g/g]'] = S_SAFT_pmv_pexp
+            
+            
+            # Calculates sorption from SAFT predictions only
+            P_SAFT[T] = linspace(_df["P[bar]"].values[0],_df["P[bar]"].values[-1], 30) * 1e5   # [Pa]
+            objects = []
+            S_SAFT_pmv[k] = []
+            for j, _p in enumerate(P_SAFT[T]):
+                if j == 0:
+                    obj = DetailedSolPol(base_obj, T, _p,)                
+                else:
+                    x0_list = update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
+                    obj = DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list,)
+                objects.append(obj)
+                S_SAFT_pmv[k].append(obj.S_sc)
+        
+        df = pd.concat([df, _df], ignore_index=True)
+        
+        _df_SAFT = pd.DataFrame({'T [K]': [T for _p in P_SAFT[T]],
+                                    'P [Pa]': [_p for _p in P_SAFT[T]],
+                                    'S_sc_pmv1 [g/g]': S_SAFT_pmv['1'],
+                                    'S_sc_pmv2 [g/g]': S_SAFT_pmv['2'],
+                                    'S_sc_pmv3 [g/g]': S_SAFT_pmv['3'],})
+        df_SAFT = pd.concat([df_SAFT,_df_SAFT], ignore_index=True)        
+    
+    print(df)
+    print(df_SAFT)
     
     if export_data == True:
         now = datetime.now()  # current time
         time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM
-        export_path = f"{data.path}/exportedData_{time_str}.xlsx"
-        with pd.ExcelWriter(export_path) as writer:
-            for T in T_list:
-                df[T].to_excel(writer, sheet_name=f"{T-273}C", index=False)
+        export_path = f"{data.path}/PlotIsothermPmv_{time_str}.xlsx"
+        with pd.ExcelWriter(export_path) as writer:            
+            df.to_excel(writer, sheet_name="exp", index=False)
+            df_SAFT.to_excel(writer, sheet_name="SAFT", index=False)
         print("Data successfully exported to: ", export_path)
     
     fig = plt.figure()
     ax = fig.add_subplot(111)
     for i, T in enumerate(T_list):
-        ax.plot(df[T]["P[bar]"],df[T]['S_exp_woSW[g/g]'],color=custom_colours[0], linestyle="None", marker="o",label=f"{T-273}°C exp - swelling uncorrected")
-        ax.plot(df[T]["P[bar]"],df[T]['S_exp_SW_pmv1[g/g]'],color=custom_colours[1], linestyle="None", marker="x",label=f"{T-273}°C exp - swelling pmv1")
-        ax.plot(df[T]["P[bar]"],df[T]['S_exp_SW_pmv2[g/g]'],color=custom_colours[2], linestyle="None", marker="x",label=f"{T-273}°C exp - swelling pmv2")
-        ax.plot(df[T]["P[bar]"],df[T]['S_exp_SW_pmv3[g/g]'],color=custom_colours[3], linestyle="None", marker="x",label=f"{T-273}°C exp - swelling pmv3")
-        ax.plot(P_SAFT[T]*1e-5,S_SAFT_pmv1[T],color=custom_colours[1], linestyle="solid",marker="None",label=f"{T-273}°C SAFT pmv1")
-        ax.plot(P_SAFT[T]*1e-5,S_SAFT_pmv2[T],color=custom_colours[2], linestyle="solid",marker="None",label=f"{T-273}°C SAFT pmv2")
-        ax.plot(P_SAFT[T]*1e-5,S_SAFT_pmv3[T],color=custom_colours[3], linestyle="solid",marker="None",label=f"{T-273}°C SAFT pmv3")
+        mask1 = abs(df['T[C]']+273 - T) <= (T*0.05)
+        ax.plot(df[mask1]["P[bar]"], df[mask1]['S_NoCorrection[g/g]'],color=custom_colours[0], linestyle="None", marker="o",label=f"{T-273}°C exp - not corrected")
+        ax.plot(df[mask1]["P[bar]"], df[mask1]['S_Corrected_pmv1[g/g]'],color=custom_colours[1], linestyle="None", marker="x",label=f"{T-273}°C exp - corrected with pmv1")
+        ax.plot(df[mask1]["P[bar]"], df[mask1]['S_Corrected_pmv2[g/g]'],color=custom_colours[2], linestyle="None", marker="x",label=f"{T-273}°C exp - corrected with pmv2")
+        ax.plot(df[mask1]["P[bar]"], df[mask1]['S_Corrected_pmv3[g/g]'],color=custom_colours[3], linestyle="None", marker="x",label=f"{T-273}°C exp - corrected with pmv3")
+        mask2 = (df_SAFT['T [K]'] == T)
+        ax.plot(df_SAFT[mask2]["P [Pa]"], df_SAFT[mask2]["S_sc_pmv1 [g/g]"],color=custom_colours[1], linestyle="solid",marker="None",label=f"{T-273}°C SAFT pmv1")
+        ax.plot(df_SAFT[mask2]["P [Pa]"], df_SAFT[mask2]["S_sc_pmv2 [g/g]"],color=custom_colours[2], linestyle="solid",marker="None",label=f"{T-273}°C SAFT pmv2")
+        ax.plot(df_SAFT[mask2]["P [Pa]"], df_SAFT[mask2]["S_sc_pmv3 [g/g]"],color=custom_colours[3], linestyle="solid",marker="None",label=f"{T-273}°C SAFT pmv3")
     ax.set_xlabel("P [bar]")
     ax.set_ylabel("S [g/g]")
     ax.tick_params(direction="in")
@@ -909,7 +936,6 @@ def plot_isotherm_epskl_EOSvExp(spm, T_list: list, eps_list:list, export_data:bo
                     _S = None
                 
                 try:
-                    # mask = (_df1["P[bar]"] == _p*1e-5)    
                     mask = abs(_df1["P[bar]"]*1e5 - _p) <= (_p*0.01)
                     _SwR = spm.SwellingRatio(T,_p)
                     _S_exp_SW = (_df1[mask]["MP1*[g]"]-data.m_met_filled+_df1[mask]["ρ[g/cc]"]*(data.Vs*(1+_SwR)+data.Vbasket)) / data.ms
@@ -975,9 +1001,9 @@ if __name__ == "__main__":
     # rho = mix.SinglePhaseDensity(hstack([1.0, 0]), 25+273, 1e5)
     # print("rho =", rho)
     # print("SR = ",mix.SwellingRatio(35+273,10e5))
-    plot_isotherm_EOSvExp(mix, [50+273,], export_data=False)
+    # plot_isotherm_EOSvExp(mix, [50+273,], export_data=False)
     # plot_isotherm_EOSvExp(mix,[25+273, 35+273, 50+273],export_data="True")
-    # plot_isotherm_pmv(mix, [50+273,], export_data=True)
+    plot_isotherm_pmv(mix, [50+273,], export_data=True)
     # S = mix.S_sc(35+273, 1e5)
     # print("S = ", S)
     # rho_m = mix.rho_mix(35+273, 1e5)
