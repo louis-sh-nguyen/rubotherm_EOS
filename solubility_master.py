@@ -49,16 +49,12 @@ matplotlib.rcParams["figure.autolayout"] = True
 custom_colours = ["black","green","blue","red","purple","orange","brown","plum","indigo","olive","grey"]
 custom_markers = ["o", "x", "^", "*", "s", "D"]
 
-# Function to update x0
-def update_x0(prev_x0, solution, lower_bound, upper_bound):
-  # Move x0 towards the middle of the bounds
-  factor = 0.5  # Adjust this factor as needed
-  if solution > upper_bound:
-    return prev_x0 - factor * (prev_x0 - upper_bound)
-  elif solution < lower_bound:
-    return prev_x0 + factor * (upper_bound - prev_x0)
-  else:
-    return solution  # No change if within bounds
+def update_x0_sol_list(previous_x0_sol:float, no_step:int=10, x0_sol_default_range=(0.9, 0.9999)):
+    if (previous_x0_sol is None) or (previous_x0_sol < 0.) or (previous_x0_sol > 1.):
+        new_x0_list =  linspace(x0_sol_default_range[0], x0_sol_default_range[1], no_step).tolist()
+    else:
+        new_x0_list = linspace(previous_x0_sol, x0_sol_default_range[1], no_step).tolist()
+    return new_x0_list
 
 class BaseSolPol:
     """Class to store information about the sol-pol mixture
@@ -139,11 +135,12 @@ class BaseSolPol:
         return _eos_mix    
 
 class DetailedSolPol(BaseSolPol):
-    def __init__(self, baseObj, T: float, P: float, x0_sol=None):
+    def __init__(self, baseObj, T: float, P: float, **kwargs):
         super().__init__(baseObj.sol, baseObj.pol, baseObj.n_monomer)
         self.T = T  # [K]
         self.P = P  # [Pa]
-        self.x0_sol = x0_sol
+        self.options = kwargs
+        #*Expected keys: x0_sol: float, x0_sol_range: list, auto_iterate_x0: bool
         
         self._S_am = None
         self._S_sc = None
@@ -161,27 +158,27 @@ class DetailedSolPol(BaseSolPol):
     @property
     def S_am(self):
         if self._S_am is None:
-            self._S_am = self.get_S_am(self.T, self.P, x0_start=self.x0_sol)
+            self._S_am = self.get_S_am(self.T, self.P)
         return self._S_am
     @property
     def S_sc(self):
         if self._S_sc is None:
-            self._S_sc = self.get_S_sc(self.T, self.P)
+            self._S_sc = self.get_S_sc()
         return self._S_sc
     @property
     def x_am(self):
         if self._x_am is None:
-            self._x_am = self.get_x_am(self.T, self.P)
+            self._x_am = self.get_x_am()
         return self._x_am
     @property
     def omega_am(self):
         if self._omega_am is None:
-            self._omega_am = self.get_omega_am(self.T, self.P)
+            self._omega_am = self.get_omega_am()
         return self._omega_am
     @property
     def rho_am(self):
         if self._rho_am is None:
-            self._rho_am = self.get_rho_am(self.T, self.P)
+            self._rho_am = self.get_rho_am()
         return self._rho_am
     @property
     def omega_cr(self):
@@ -201,83 +198,20 @@ class DetailedSolPol(BaseSolPol):
     @property
     def rho_mix(self):
         if self._rho_mix is None:
-            self._rho_mix = self.get_rho_mix(self.T, self.P)
+            self._rho_mix = self.get_rho_mix()
         return self._rho_mix
     @property
     def rho_mix_0(self):
         if self._rho_mix_0 is None:
-            self._rho_mix_0 = self.get_rho_mix_0(self.T)
+            self._rho_mix_0 = self.get_rho_mix_0()
         return self._rho_mix_0
     @property
     def SwellingRatio(self):
         if self._SwellingRatio is None:
-            self._SwellingRatio = self.get_SwellingRatio(self.T, self.P)
+            self._SwellingRatio = self.get_SwellingRatio()
         return self._SwellingRatio
     
-    def get_muad_sol_ext(self, T:float, P:float):        
-        eos_sol = self.eos_sol
-        psat, vlsat, vvsat = eos_sol.psat(T)
-        # Saturation Pressure (Pa), saturated liquid volume (m3/mol), saturated vapor volume (m3/mol).
-        if P >= psat:  # L phase
-            rho_1 = eos_sol.density(T, P, "L")  # [mol/m^3]
-        else:  # V phase
-            rho_1 = eos_sol.density(T, P, "V")  # [mol/m^3]
-
-        muad_sol_ext = eos_sol.muad(rho_1, T) / (8.314 * T)  # [adim]
-        return muad_sol_ext
-    
-    def get_omega_cr(self, T: float):
-        """Function to get omega_cr as a function of T. Reads data from excel sheet called /data_example.xlsx.
-        Ref: [1]: Polymer, 59, 2015, 270-277.
-        
-        """
-        
-        data = SolPolExpData(self.sol, self.pol)
-        
-        try:
-            # Read exp file
-            df = pd.read_excel(data.file, sheet_name="omega_cr")
-        
-        except Exception as e:
-            print("Error: ")
-            print(e)
-            return None        
-        
-        if self.pol == "HDPE":
-            # print(df.dtypes)  # Chek data types
-            omega_c = df[df["T (°C)"] == (T-273)]["omega_cr_HDPE"].values[0]
-            
-        else:
-            omega_c = 0
-        # self.omega_cr = omega_cr
-        return omega_c
-    
-    def get_rho_pol_cr(self, T: float):
-        """Function to get density of crystalline domain of polymer.
-            
-        """
-        
-        data = SolPolExpData(self.sol, self.pol)
-        try:
-            # Read exp file
-            df = pd.read_excel(data.file, sheet_name="rho_cr")
-        
-        except Exception as e:
-            print("Error: ")
-            print(e)
-            return None        
-        
-        if self.pol == "HDPE":
-            # print(df.dtypes)  # Chek data types
-            _rho_pol_cr = df[df["T (°C)"] == (T-273)]["rho_cr_HDPE (g/cm3)"].values[0]   # [g/cm^3]
-            
-        else:
-            _rho_pol_cr = 1000   # [g/cm^3]
-        
-        rho_pol_cr = _rho_pol_cr *1e6   # [g/m^3]
-        return rho_pol_cr
-    
-    
+    ### INDEPENDENT functions
     def SinglePhaseDensity(self, x:array , T: float, P: float):
         """Function to calculate single phase density of mixture without specifying phase.
         Unit = [mol/m^3]
@@ -297,6 +231,19 @@ class DetailedSolPol(BaseSolPol):
             rho = rhoV
         
         return rho
+    
+    def get_muad_sol_ext(self, T:float, P:float):        
+        eos_sol = self.eos_sol
+        psat, vlsat, vvsat = eos_sol.psat(T)
+        
+        # Saturation Pressure (Pa), saturated liquid volume (m3/mol), saturated vapor volume (m3/mol).
+        if P >= psat:  # L phase
+            rho_1 = eos_sol.density(T, P, "L")  # [mol/m^3]
+        else:  # V phase
+            rho_1 = eos_sol.density(T, P, "V")  # [mol/m^3]
+
+        muad_sol_ext = eos_sol.muad(rho_1, T) / (8.314 * T)  # [adim]
+        return muad_sol_ext
 
     def V_sol(self, x: array, T: float, P:float, eps:float = 1.0e-5): 
         """Function to calculate partial volume of solute in mixture. 
@@ -393,46 +340,69 @@ class DetailedSolPol(BaseSolPol):
         Args:
             T (float): temperature [K].            
         """
+        
         V_s = self.V_sol(hstack([0., 1.]), T, 1e5)  # [m^3/g]        
         V_p = self.V_pol(hstack([0., 1.]), T, 1e5)  # [m^3/g]
         return V_s, V_p
     
-    def get_rho_am(self, T: float, P: float):
-        """Function to get density of amorphous domain of polymer.
-        Unit = [g/m^3]
-
-        Args:
-            T (float): Temperature [K].
-            P (float): Pressure [Pa].            
+    def get_omega_cr(self, T: float):
+        """Function to get omega_cr as a function of T. Reads data from excel sheet called /data_example.xlsx.
+        Ref: [1]: Polymer, 59, 2015, 270-277.
+        
         """
         
-        S_a = self.S_am  # [g/g]
+        data = SolPolExpData(self.sol, self.pol)
         
-        #* METHOD 1: Evaluate Vs and Vp at each composition, most robust
-        if self.pmv_method == "1":
-            V_s, V_p =  self.Vs_Vp_pmv1(T, P)            
+        try:
+            # Read exp file
+            df = pd.read_excel(data.file, sheet_name="omega_cr")
         
-        #* METHOD 2: Assuming Vs and Vp same as specific volume at __infinitely dilution__ 
-        if self.pmv_method == "2":
-            V_s, V_p =  self.Vs_Vp_pmv2(T, P)
+        except Exception as e:
+            print("Error: ")
+            print(e)
+            return None        
         
-        #* METHOD 3: Assuming Vs and Vp at __infinitely dilution__, unchanged at atmospheric pressure, least robust
-        if self.pmv_method == "3":
-            V_s, V_p =  self.Vs_Vp_pmv3(T)
+        if self.pol == "HDPE":
+            # print(df.dtypes)  # Chek data types
+            omega_c = df[df["T (°C)"] == (T-273)]["omega_cr_HDPE"].values[0]
+            
+        else:
+            omega_c = 0
+        # self.omega_cr = omega_cr
+        return omega_c
+    
+    def get_rho_pol_cr(self, T: float):
+        """Function to get density of crystalline domain of polymer.
+            
+        """
         
-        # print(f"Vs at {T}K and {P} Pa = ", V_s)
-        # print(f"Vp at {T}K and {P} Pa = ", V_p)
-        # print(f"Sa at {T}K and {P} Pa = ", S_a)
-        rho_am = 1 / (S_a*V_s + V_p) # [g/m^3]
-        return rho_am
-
-    def get_S_am(self, T: float, P: float, x0_start:float = None, x0_original:list=linspace(9.0e-1, 9.99e-1, 10)):
+        data = SolPolExpData(self.sol, self.pol)
+        try:
+            # Read exp file
+            df = pd.read_excel(data.file, sheet_name="rho_cr")
+        
+        except Exception as e:
+            print("Error: ")
+            print(e)
+            return None        
+        
+        if self.pol == "HDPE":
+            # print(df.dtypes)  # Chek data types
+            _rho_pol_cr = df[df["T (°C)"] == (T-273)]["rho_cr_HDPE (g/cm3)"].values[0]   # [g/cm^3]
+            
+        else:
+            _rho_pol_cr = 1000   # [g/cm^3]
+        
+        rho_pol_cr = _rho_pol_cr *1e6   # [g/m^3]
+        return rho_pol_cr    
+    
+    def get_S_am(self, T: float, P: float):
         """Solve solubility in amorphous rubbery polymer at equilibrium.
-
+        
         Args:
-            T (float): temperature [K].
-            P (float): pressure [Pa].
-            x0 (list): list of initial points of molar composition for fsolve.
+            T (float): Temperature [K].
+            P (float): Pressure [Pa].
+        
         """
         MW_sol = self.MW_sol
         MW_pol = self.MW_pol
@@ -443,23 +413,23 @@ class DetailedSolPol(BaseSolPol):
         # sol-pol mixture (EQ)
         def func(_x_1):
             _x = hstack([_x_1, 1 - _x_1])  # [mol/mol-mix]
-            _rhol = eos_mix.density(_x, T, P, "L")  
+            _rhol = eos_mix.density(_x, T, P, "L")
             _rho_i = _x * _rhol  # [mol/m^3-mix]
             _muad_m = eos_mix.muad(_rho_i, T)  # dimensionless [mu/RT]
             _muad_s_m = _muad_m[0]      # dimensionless chemical potential of solute in sol-pol mixture
             return [_muad_s_m - muad_s_ext]
         
-        if x0_start is None:
-            x0_list = x0_original.tolist()
+        x0_sol_single = self.options.get("x0_sol", None)
+        x0_sol_range = self.options.get("x0_sol_range", linspace(0.90, 0.999, 10).tolist())
+        # auto_iterate_x0 = self.options.get("auto_iterate_x0", False)
+        
+        if x0_sol_single is None:
+            x0_list = x0_sol_range
         else:
-            x0_list = [x0_start] + x0_original.tolist()
-        print("T = ", T)
-        print("P = ", P)
-        print("x0_list = ", x0_list)
-        print("x0_start = ", x0_start)
-        print("x0_original = ", x0_original)
-        i = 0
-        while i < (len(x0_list)):
+            x0_list = [x0_sol_single]
+            
+        for i, x0 in enumerate(x0_list):
+            
             try:
                 solution = fsolve(func, x0=float(x0_list[i]))
                 residue = func(_x_1=solution)
@@ -467,96 +437,15 @@ class DetailedSolPol(BaseSolPol):
                 if isclose(residue_float, [0.0]).all() == True:
                     x_sol = solution[0]  # [mol-sol/mol-mix]
                     omega_sol = (x_sol * MW_sol) / (x_sol * MW_sol + (1 - x_sol) * MW_pol)
-                    solubility_gg = omega_sol / (1-omega_sol)                    
-                    return solubility_gg               
-                
+                    solubility_gg = omega_sol / (1-omega_sol)
+                    return solubility_gg
             except Exception as e:
                 print(f"Step {i+1}/{len(x0_list)+1} (x0={x0_list[i]}): ", e)
             
-            i += 1                
-        if i >= (len(x0_list)):
-            print("\nNo solution found for T = %g K\tP = %g Pa" % (T, P))
-            print("")
-            return None
-
-    def get_omega_am(self, T: float, P: float):
-        S_a = self.S_am
-        omega_p = 1/(S_a+1)     # [g/g]
-        omega_s = 1 - omega_p   # [g/g]
-        return hstack([omega_s, omega_p])
-    
-    def get_x_am(self, T: float, P: float):
-        w = self.omega_am
-        omega_s = w[0]
-        omega_p = w[1]
-        x_s = (omega_s/self.MW_sol) / (omega_s/self.MW_sol + omega_p/self.MW_pol)   #[mol/mol]
-        return hstack([x_s, 1-x_s])
-        
-        
-    def get_S_sc(self, T: float, P: float):
-        """Function to calculate overall solubility of sol in pol, adjsuted for omega_cr.
-
-        Args:
-            T (float): temperature [K].
-            P (float): pressure [Pa].
-        """
-        # Get omega_cr
-        omega_c = self.omega_cr
-        # Get solubility in amorphous domain
-        S_a = self.S_am    #[g/g]
-        # Get solubility in semi-crystalline polymer
-        S_sc = S_a * (1-omega_c)  # [g/g]
-        return S_sc
-
-    def get_rho_mix(self, T:float, P: float):
-        """Function to get total density of mixture.
-        Unit = [g/m^3]
-
-        Args:
-            spm (class object): class object representing the sol-pol mixture.
-            T (float): temperature [K].
-            P (float): pressure [Pa].
-        """    
-        omega_c = self.omega_cr
-        rho_pol_am = self.rho_am  # [g/m^3]
-        rho_pol_cr = self.rho_pol_cr  # [g/m^3]
-        S = self.S_sc # [g_sol/g_pol]
-        rho_mix = (1 + S) / ((1-omega_c)/rho_pol_am + omega_c/rho_pol_cr) # [g/m^3]
-        return rho_mix
-
-    def get_rho_mix_0(self, T:float):
-        """Function to calculate dry polymer density. This is equal to overall dry polymer  density.
-
-        Args:
-            T (float): temperature [K].
-        """
-        omega_c = self.omega_cr  # [g/g]
-        rho_pol_cr = self.rho_pol_cr  # [g/m^3]
-        rho_pol_am = self.SinglePhaseDensity(array([0., 1.]), T, P=1)*self.MW_pol # [g/m^3]
-        rho_pol = 1 / ((1-omega_c)/rho_pol_am + omega_c/rho_pol_cr) # [g/m63]
-        return rho_pol
-
-    def get_SwellingRatio(self, T: float, P: float):
-        """Function to get swelling ratio.
-
-        Args:
-            T (float): temperature [K].
-            P (float): pressure [Pa].
-        """
-        
-        SR = (self.rho_mix_0 / self.rho_mix * (1 + self.S_sc)) - 1
-        return SR
-    
-    def SwellingRatio_am(self, T: float, P: float):
-        """Function to get swelling ratio of amorphous domain in polymer.
-
-        Args:
-            T (float): temperature [K].
-            P (float): pressure [Pa].
-        """
-        
-        SR_a = (self.rho_am(T, 1) / self.rho_am(T,P) * (1 + self.get_S_am(T,P))) - 1
-        return SR_a
+            if i >= (len(x0_list)):
+                print("Failed to find solution within max iteractions number")
+                print("")
+                return None
 
     def modify_kl(self, eps:float, lr='CR'):
         """Function to modify cross interaction (eps_kl and lambda_repulsive_kl).
@@ -568,6 +457,86 @@ class DetailedSolPol(BaseSolPol):
         
         if self.sol == "CO2" and (self.pol == "HDPE" or self.pol == "PE"):
             database.new_interaction_mie("CO2", "CH2", eps, lr, overwrite=True)
+    
+    ### DEPENDENT functions
+    def get_rho_am(self):
+        """Function to get density of amorphous domain of polymer.
+        Unit = [g/m^3]
+        
+        """
+        
+        S_a = self.S_am  # [g/g]
+        T = self.T
+        P = self.P
+        #* METHOD 1: Evaluate Vs and Vp at each composition, most robust
+        if self.pmv_method == "1":
+            V_s, V_p =  self.Vs_Vp_pmv1(T, P)            
+        
+        #* METHOD 2: Assuming Vs and Vp same as specific volume at __infinitely dilution__ 
+        if self.pmv_method == "2":
+            V_s, V_p =  self.Vs_Vp_pmv2(T, P)
+        
+        #* METHOD 3: Assuming Vs and Vp at __infinitely dilution__, unchanged at atmospheric pressure, least robust
+        if self.pmv_method == "3":
+            V_s, V_p =  self.Vs_Vp_pmv3(T)
+
+        rho_am = 1 / (S_a*V_s + V_p) # [g/m^3]
+        return rho_am
+
+    def get_omega_am(self):
+        S_a = self.S_am
+        omega_p = 1/(S_a+1)     # [g/g]
+        omega_s = 1 - omega_p   # [g/g]
+        return hstack([omega_s, omega_p])
+    
+    def get_x_am(self):
+        w = self.omega_am
+        omega_s = w[0]
+        omega_p = w[1]
+        x_s = (omega_s/self.MW_sol) / (omega_s/self.MW_sol + omega_p/self.MW_pol)   #[mol/mol]
+        return hstack([x_s, 1-x_s])
+    
+    def get_S_sc(self):
+        """Function to calculate overall solubility of sol in pol, adjsuted for omega_cr.
+
+        """
+        # Get omega_cr
+        omega_c = self.omega_cr
+        # Get solubility in amorphous domain
+        S_a = self.S_am    #[g/g]
+        # Get solubility in semi-crystalline polymer
+        S_sc = S_a * (1-omega_c)  # [g/g]
+        return S_sc
+
+    def get_rho_mix(self):
+        """Function to get total density of mixture.
+        Unit = [g/m^3]
+
+        """    
+        omega_c = self.omega_cr
+        rho_pol_am = self.rho_am  # [g/m^3]
+        rho_pol_cr = self.rho_pol_cr  # [g/m^3]
+        S = self.S_sc # [g_sol/g_pol]
+        rho_mix = (1 + S) / ((1-omega_c)/rho_pol_am + omega_c/rho_pol_cr) # [g/m^3]
+        return rho_mix
+
+    def get_rho_mix_0(self):
+        """Function to calculate dry polymer density. This is equal to overall dry polymer  density.
+
+        """
+        omega_c = self.omega_cr  # [g/g]
+        rho_pol_cr = self.rho_pol_cr  # [g/m^3]
+        rho_pol_am = self.SinglePhaseDensity(array([0., 1.]), self.T, P=1)*self.MW_pol # [g/m^3]
+        rho_pol = 1 / ((1-omega_c)/rho_pol_am + omega_c/rho_pol_cr) # [g/m63]
+        return rho_pol
+
+    def get_SwellingRatio(self):
+        """Function to get swelling ratio.
+        """
+        
+        SR = (self.rho_mix_0 / self.rho_mix * (1 + self.S_sc)) - 1
+        return SR
+
 
 class SolPolExpData():
     def __init__(self, sol: str, pol: str, data_file="data_example.xlsx"):
@@ -632,7 +601,7 @@ def fit_epskl(spm, T, x0=200, epskl_bounds=(100, 500)):
     
     print("Optimised value of eps: ", result.x)
     print("Objective function value at optimised: ", fobj(result.x))
-    
+
 def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False):
     """Function to plot sorption of EOS and experimental data (not corrected for swelling).
 
@@ -649,87 +618,56 @@ def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False
     S_SAFT={}
     
     for i, T in enumerate(T_list):
-        _df=data.get_sorption_data(T)
-        # Sorption without swelling correction
-        S_exp_woSW = (_df["MP1*[g]"]-data.m_met_filled+_df["ρ[g/cc]"]*(data.Vs+data.Vbasket)) / data.ms
-        _df['S_exp_woSW[g/g]']=S_exp_woSW
-        # Calculate swelling ratio from SAFT
-        SwR_SAFT = [DetailedSolPol(base_obj, T, _p).SwellingRatio for _p in _df["P[bar]"]*1e5]
-        _df['SwR_SAFT[cc/cc]'] = SwR_SAFT
-        # Sorption with swelling correction
-        S_exp_SW = (_df["MP1*[g]"]-data.m_met_filled+_df["ρ[g/cc]"]*(data.Vs*(1+_df['SwR_SAFT[cc/cc]'])+data.Vbasket)) / data.ms
-        _df['S_exp_SW[g/g]'] = S_exp_SW
         
-        P_SAFT[T] = linspace(_df["P[bar]"].values[0],_df["P[bar]"].values[-1], 30) * 1e5   # [Pa]
-        S_SAFT[T] = [DetailedSolPol(base_obj, T, _p).S_sc for _p in P_SAFT[T]]
-        _S_SAFT = [DetailedSolPol(base_obj, T, _p).S_sc for _p in _df["P[bar]"]*1e5]
-        _df['S_SAFT[g/g]'] = _S_SAFT
-        df[T] = _df
-        print("\n \n")
-        print("T = ", T)
-        print(df[T])
-        print("")
-    
-    if export_data == True:
-        now = datetime.now()  # current time
-        time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM
-        export_path = f"{data.path}/PlotIsothermEOSvExp_{time_str}.xlsx"
-        with pd.ExcelWriter(export_path) as writer:
-            for T in T_list:
-                df[T].to_excel(writer, sheet_name=f"{T-273}C", index=False)
-        print("Data successfully exported to: ", export_path)
-    
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    for i, T in enumerate(T_list):
-        ax.plot(df[T]["P[bar]"],df[T]['S_exp_woSW[g/g]'],color=custom_colours[i], linestyle="None", marker="o",label=f"{T-273}°C exp - swelling uncorrected")
-        ax.plot(df[T]["P[bar]"],df[T]['S_exp_SW[g/g]'],color=custom_colours[i], linestyle="None", marker="x",label=f"{T-273}°C exp - swelling corrected")
-        ax.plot(P_SAFT[T]*1e-5,S_SAFT[T],color=custom_colours[i], linestyle="solid",marker="None",label=f"{T-273}°C SAFT")
-    ax.set_xlabel("P [bar]")
-    ax.set_ylabel("S [g/g]")
-    ax.tick_params(direction="in")
-    ax.legend().set_visible(True)
-    plt.show()
-
-
-def plot_isotherm_EOSvExp_NEW(base_obj, T_list:list[float], export_data:bool = False):
-    """Function to plot sorption of EOS and experimental data (not corrected for swelling).
-
-    Args:
-        spm (class object): class object representing the sol-pol mixture.
-        T (float): temperature [K].
-        P (float): pressure [Pa].
-        export_data (bool): export data.
-    """
-    data = SolPolExpData(base_obj.sol, base_obj.pol)
-    
-    df={}    
-    P_SAFT={}
-    S_SAFT={}
-    
-    for i, T in enumerate(T_list):
         _df=data.get_sorption_data(T)
+        
         # Sorption without swelling correction
         S_exp_woSW = (_df["MP1*[g]"]-data.m_met_filled+_df["ρ[g/cc]"]*(data.Vs+data.Vbasket)) / data.ms
         _df['S_exp_woSW[g/g]']=S_exp_woSW
+        
         # Calculate swelling ratio from SAFT
+        objects = []
         SwR_SAFT = []
-        x0 = None
         for j, _p in enumerate(_df["P[bar]"].values *1e5):
-            obj = DetailedSolPol(base_obj, T, _p, x0_sol=x0)            
+            if j == 0:
+                obj = DetailedSolPol(base_obj, T, _p,)                
+            else:
+                x0_list = update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
+                obj = DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list,)
+            objects.append(obj)
             SwR_SAFT.append(obj.SwellingRatio)
-            # if j < len(_df["P[bar]"].values *1e5) - 1:
-            x0 = obj.x_am[0]
-            print("x0 = ", x0)
+
         _df['SwR_SAFT[cc/cc]'] = SwR_SAFT
         # Sorption with swelling correction
         S_exp_SW = (_df["MP1*[g]"]-data.m_met_filled+_df["ρ[g/cc]"]*(data.Vs*(1+_df['SwR_SAFT[cc/cc]'])+data.Vbasket)) / data.ms
         _df['S_exp_SW[g/g]'] = S_exp_SW
         
+        # Calculate S_sc for continuous SAFT line        
+        objects = []
+        S_SAFT[T] = []
         P_SAFT[T] = linspace(_df["P[bar]"].values[0],_df["P[bar]"].values[-1], 30) * 1e5   # [Pa]
-        S_SAFT[T] = [DetailedSolPol(base_obj, T, _p).S_sc for _p in P_SAFT[T]]
-        _S_SAFT = [DetailedSolPol(base_obj, T, _p).S_sc for _p in _df["P[bar]"]*1e5]
-        _df['S_SAFT[g/g]'] = _S_SAFT
+        for j, _p in enumerate(P_SAFT[T]):
+            if j == 0:
+                obj = DetailedSolPol(base_obj, T, _p,)
+            else:
+                x0_list = update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
+                obj = DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list,)
+            objects.append(obj)
+            S_SAFT[T].append(obj.S_sc)
+            
+        # Calculate S_sc at experimental pressure points
+        objects = []
+        S_SAFT_pexp = []
+        for j, _p in enumerate(_df["P[bar]"]*1e5):
+            if j == 0:
+                obj = DetailedSolPol(base_obj, T, _p,)
+            else:
+                x0_list = update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
+                obj = DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list,)
+            objects.append(obj)
+            S_SAFT_pexp.append(obj.S_sc)
+        _df['S_SAFT[g/g]'] = S_SAFT_pexp
+        
         df[T] = _df
         print("\n \n")
         print("T = ", T)
@@ -756,7 +694,6 @@ def plot_isotherm_EOSvExp_NEW(base_obj, T_list:list[float], export_data:bool = F
     ax.tick_params(direction="in")
     ax.legend().set_visible(True)
     plt.show()
-
 
 def plot_isotherm_pmv(spm, T_list:list[float], export_data:bool = False):
     """Function to plot sorption of EOS and experimental data to compare different partial molar volume approaches.
@@ -1032,12 +969,13 @@ def plot_isotherm_epskl_EOSvExp(spm, T_list: list, eps_list:list, export_data:bo
 
 if __name__ == "__main__":    
     mix = BaseSolPol("CO2","HDPE")
+    
 
     # mix.pmv_method="3"
     # rho = mix.SinglePhaseDensity(hstack([1.0, 0]), 25+273, 1e5)
     # print("rho =", rho)
     # print("SR = ",mix.SwellingRatio(35+273,10e5))
-    plot_isotherm_EOSvExp_NEW(mix, [50+273,], export_data=False)
+    plot_isotherm_EOSvExp(mix, [50+273,], export_data=False)
     # plot_isotherm_EOSvExp(mix,[25+273, 35+273, 50+273],export_data="True")
     # plot_isotherm_pmv(mix, [50+273,], export_data=True)
     # S = mix.S_sc(35+273, 1e5)
