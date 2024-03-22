@@ -76,7 +76,6 @@ class BaseSolPol:
         self.sol = sol
         self.pol = pol
         self.n_monomer = n_monomer
-        self.pmv_method = "1"
         
         MW_monomer = {
             "HDPE": 28,            
@@ -135,10 +134,11 @@ class BaseSolPol:
         return _eos_mix    
 
 class DetailedSolPol(BaseSolPol):
-    def __init__(self, baseObj, T: float, P: float, **kwargs):
+    def __init__(self, baseObj, T: float, P: float, pmv_method:str = "1", **kwargs):
         super().__init__(baseObj.sol, baseObj.pol, baseObj.n_monomer)
         self.T = T  # [K]
         self.P = P  # [Pa]
+        self.pmv_method = pmv_method
         self.options = kwargs
         #*Expected keys: x0_sol: float, x0_sol_range: list, auto_iterate_x0: bool
         
@@ -300,15 +300,14 @@ class DetailedSolPol(BaseSolPol):
         
         return dV_dnp / self.MW_pol # [m^3/g]
     
-    def Vs_Vp_pmv1(self, T: float, P: float):
+    def Vs_Vp_pmv1(self):
         """Function to calculate partial volume of solute in mixture, using pmv method 1.
         pmv method 1: using solubility composition.
         Unit = [m3/g]
 
-        Args:
-            T (float): temperature [K].
-            P (float): pressure [Pa].
         """
+        T = self.T
+        P = self.P
         S_a = self.S_am  # [g/g]    
         omega_p = 1/(S_a+1)     # [g/g]
         omega_s = 1 - omega_p   # [g/g]
@@ -319,28 +318,25 @@ class DetailedSolPol(BaseSolPol):
         V_p = self.V_pol(x, T, P)  # [m^3/g]
         return V_s, V_p
     
-    def Vs_Vp_pmv2(self, T: float, P: float):
+    def Vs_Vp_pmv2(self):
         """Function to calculate partial volume of solute in mixture, using pmv method 2.
         pmv method 2: assuming Vs and Vp same as specific volume at __infinitely dilution__.
         Unit = [m3/g]
 
-        Args:
-            T (float): temperature [K].
-            P (float): pressure [Pa].
         """
+        T = self.T
+        P = self.P
         V_s = self.V_sol(hstack([0., 1.]), T, P)  # [m^3/g]        
         V_p = self.V_pol(hstack([0., 1.]), T, P)  # [m^3/g]
         return V_s, V_p
     
-    def Vs_Vp_pmv3(self, T: float):
+    def Vs_Vp_pmv3(self):
         """Function to calculate partial volume of solute in mixture, using pmv method 3.
         pmv method 3: assuming Vs and Vp at __infinitely dilution__, unchanged at atmospheric pressure.
         Unit = [m3/g]
-
-        Args:
-            T (float): temperature [K].            
+         
         """
-        
+        T = self.T        
         V_s = self.V_sol(hstack([0., 1.]), T, 1e5)  # [m^3/g]        
         V_p = self.V_pol(hstack([0., 1.]), T, 1e5)  # [m^3/g]
         return V_s, V_p
@@ -467,19 +463,18 @@ class DetailedSolPol(BaseSolPol):
         """
         
         S_a = self.S_am  # [g/g]
-        T = self.T
-        P = self.P
+
         #* METHOD 1: Evaluate Vs and Vp at each composition, most robust
         if self.pmv_method == "1":
-            V_s, V_p =  self.Vs_Vp_pmv1(T, P)            
+            V_s, V_p =  self.Vs_Vp_pmv1()            
         
         #* METHOD 2: Assuming Vs and Vp same as specific volume at __infinitely dilution__ 
         if self.pmv_method == "2":
-            V_s, V_p =  self.Vs_Vp_pmv2(T, P)
+            V_s, V_p =  self.Vs_Vp_pmv2()
         
         #* METHOD 3: Assuming Vs and Vp at __infinitely dilution__, unchanged at atmospheric pressure, least robust
         if self.pmv_method == "3":
-            V_s, V_p =  self.Vs_Vp_pmv3(T)
+            V_s, V_p =  self.Vs_Vp_pmv3()
 
         rho_am = 1 / (S_a*V_s + V_p) # [g/m^3]
         return rho_am
@@ -720,18 +715,17 @@ def plot_isotherm_pmv(base_obj, T_list:list[float], export_data:bool = False):
         _df['S_NoCorrection[g/g]'] = S_exp_woSW
         
         # Iterate through each pmv method
-        for k in "1", "2", "3":
-            base_obj.pmv_method = k
+        for k in ["1", "2", "3"]:
             
             # Calculate swelling ratio from SAFT at pmv
             objects = []
             SwR_SAFT_pmv = []
             for j, _p in enumerate(_df["P[bar]"].values *1e5):
                 if j == 0:
-                    obj = DetailedSolPol(base_obj, T, _p,)                
+                    obj = DetailedSolPol(base_obj, T, _p, pmv_method=k)                
                 else:
                     x0_list = update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
-                    obj = DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list,)
+                    obj = DetailedSolPol(base_obj, T, _p, pmv_method=k, x0_sol_range = x0_list,)
                 objects.append(obj)
                 SwR_SAFT_pmv.append(obj.SwellingRatio)                    
             _df[f'SwR_SAFT_pmv{k}[cc/cc]'] = SwR_SAFT_pmv
@@ -745,14 +739,13 @@ def plot_isotherm_pmv(base_obj, T_list:list[float], export_data:bool = False):
             S_SAFT_pmv_pexp = []
             for j, _p in enumerate(_df["P[bar]"].values *1e5):
                 if j == 0:
-                    obj = DetailedSolPol(base_obj, T, _p,)                
+                    obj = DetailedSolPol(base_obj, T, _p, pmv_method=k)                
                 else:
                     x0_list = update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
-                    obj = DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list,)
+                    obj = DetailedSolPol(base_obj, T, _p, pmv_method=k, x0_sol_range = x0_list,)
                 objects.append(obj)
                 S_SAFT_pmv_pexp.append(obj.S_sc)
-            _df[f'S_SAFT_pmv{k}[g/g]'] = S_SAFT_pmv_pexp
-            
+            _df[f'S_SAFT_pmv{k}[g/g]'] = S_SAFT_pmv_pexp            
             
             # Calculates sorption from SAFT predictions only
             P_SAFT[T] = linspace(_df["P[bar]"].values[0],_df["P[bar]"].values[-1], 30) * 1e5   # [Pa]
@@ -760,10 +753,10 @@ def plot_isotherm_pmv(base_obj, T_list:list[float], export_data:bool = False):
             S_SAFT_pmv[k] = []
             for j, _p in enumerate(P_SAFT[T]):
                 if j == 0:
-                    obj = DetailedSolPol(base_obj, T, _p,)                
+                    obj = DetailedSolPol(base_obj, T, _p, pmv_method=k)                
                 else:
                     x0_list = update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
-                    obj = DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list,)
+                    obj = DetailedSolPol(base_obj, T, _p, pmv_method=k, x0_sol_range = x0_list,)
                 objects.append(obj)
                 S_SAFT_pmv[k].append(obj.S_sc)
         
@@ -797,28 +790,28 @@ def plot_isotherm_pmv(base_obj, T_list:list[float], export_data:bool = False):
         ax.plot(df[mask1]["P[bar]"], df[mask1]['S_Corrected_pmv2[g/g]'],color=custom_colours[2], linestyle="None", marker="x",label=f"{T-273}°C exp - corrected with pmv2")
         ax.plot(df[mask1]["P[bar]"], df[mask1]['S_Corrected_pmv3[g/g]'],color=custom_colours[3], linestyle="None", marker="x",label=f"{T-273}°C exp - corrected with pmv3")
         mask2 = (df_SAFT['T [K]'] == T)
-        ax.plot(df_SAFT[mask2]["P [Pa]"], df_SAFT[mask2]["S_sc_pmv1 [g/g]"],color=custom_colours[1], linestyle="solid",marker="None",label=f"{T-273}°C SAFT pmv1")
-        ax.plot(df_SAFT[mask2]["P [Pa]"], df_SAFT[mask2]["S_sc_pmv2 [g/g]"],color=custom_colours[2], linestyle="solid",marker="None",label=f"{T-273}°C SAFT pmv2")
-        ax.plot(df_SAFT[mask2]["P [Pa]"], df_SAFT[mask2]["S_sc_pmv3 [g/g]"],color=custom_colours[3], linestyle="solid",marker="None",label=f"{T-273}°C SAFT pmv3")
+        ax.plot(df_SAFT[mask2]["P [Pa]"]*1e-5, df_SAFT[mask2]["S_sc_pmv1 [g/g]"],color=custom_colours[1], linestyle="solid",marker="None",label=f"{T-273}°C SAFT pmv1")
+        ax.plot(df_SAFT[mask2]["P [Pa]"]*1e-5, df_SAFT[mask2]["S_sc_pmv2 [g/g]"],color=custom_colours[2], linestyle="solid",marker="None",label=f"{T-273}°C SAFT pmv2")
+        ax.plot(df_SAFT[mask2]["P [Pa]"]*1e-5, df_SAFT[mask2]["S_sc_pmv3 [g/g]"],color=custom_colours[3], linestyle="solid",marker="None",label=f"{T-273}°C SAFT pmv3")
     ax.set_xlabel("P [bar]")
     ax.set_ylabel("S [g/g]")
     ax.tick_params(direction="in")
     ax.legend().set_visible(True)
     plt.show()
 
-def plot_pmv(spm, T: float):
+def plot_pmv(base_obj, T: float):
     """Function to plot partial molar volume isotherms at single temperature.
 
     Args:
         spm (class object): class object representing the sol-pol mixture.
         T (float): temperature [K].        
     """
-    data = SolPolExpData(spm.sol, spm.pol)    
+    data = SolPolExpData(base_obj.sol, base_obj.pol)    
     _df=data.get_sorption_data(T)
-    p = linspace(1, _df["P[bar]"].tolist()[-1]*1e5, 10) #[Pa]
-    Vs_pmv1, Vp_pmv1 = zip(*[spm.Vs_Vp_pmv1(T, _p) for _p in p])
-    Vs_pmv2, Vp_pmv2 = zip(*[spm.Vs_Vp_pmv2(T, _p) for _p in p])
-    Vs_pmv3, Vp_pmv3 = zip(*[spm.Vs_Vp_pmv3(T) for _p in p])
+    p = linspace(1, _df["P[bar]"].values[-1]*1e5, 10) #[Pa]
+    Vs_pmv1, Vp_pmv1 = zip(*[DetailedSolPol(base_obj, T, _p).Vs_Vp_pmv1(T, _p) for _p in p])
+    Vs_pmv2, Vp_pmv2 = zip(*[DetailedSolPol(base_obj, T, _p).Vs_Vp_pmv2(T, _p) for _p in p])
+    Vs_pmv3, Vp_pmv3 = zip(*[DetailedSolPol(base_obj, T, _p).Vs_Vp_pmv3(T) for _p in p])
         
     fig = plt.figure(figsize=[4.0, 7])
     ax1 = fig.add_subplot(211)
@@ -995,15 +988,17 @@ def plot_isotherm_epskl_EOSvExp(spm, T_list: list, eps_list:list, export_data:bo
 
 if __name__ == "__main__":    
     mix = BaseSolPol("CO2","HDPE")
-    
-
+    # mix.pmv_method = "2"
+    # a = DetailedSolPol(mix,35+273, 1e5)
+    # for key, value in a.__dict__.items():
+    #     print(f"{key}: {value}")
     # mix.pmv_method="3"
     # rho = mix.SinglePhaseDensity(hstack([1.0, 0]), 25+273, 1e5)
     # print("rho =", rho)
     # print("SR = ",mix.SwellingRatio(35+273,10e5))
     # plot_isotherm_EOSvExp(mix, [50+273,], export_data=False)
     # plot_isotherm_EOSvExp(mix,[25+273, 35+273, 50+273],export_data="True")
-    plot_isotherm_pmv(mix, [50+273,], export_data=True)
+    plot_isotherm_pmv(mix, [50+273,], export_data=False)
     # S = mix.S_sc(35+273, 1e5)
     # print("S = ", S)
     # rho_m = mix.rho_mix(35+273, 1e5)
