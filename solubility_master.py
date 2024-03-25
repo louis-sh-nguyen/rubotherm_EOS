@@ -631,7 +631,7 @@ def fit_epskl(base_obj, T:float, x0: float = 200, epskl_bounds:tuple = (100, 500
     print("Optimised value of eps: ", result.x)
     print("Objective function value at optimised: ", fobj(result.x))
 
-def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False):
+def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False, display_fig:bool=True, save_fig:bool=False):
     """Function to plot sorption of EOS and experimental data (not corrected for swelling).
 
     Args:
@@ -641,6 +641,8 @@ def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False
         export_data (bool): export data.
     """
     data = SolPolExpData(base_obj.sol, base_obj.pol)
+    now = datetime.now()  # current time
+    time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM    
     
     df={}    
     P_SAFT={}
@@ -703,9 +705,8 @@ def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False
         print(df[T])
         print("")
     
+    
     if export_data == True:
-        now = datetime.now()  # current time
-        time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM
         export_path = f"{data.path}/PlotIsothermEOSvExp_{time_str}.xlsx"
         with pd.ExcelWriter(export_path) as writer:
             for T in T_list:
@@ -722,7 +723,12 @@ def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False
     ax.set_ylabel("S [g/g]")
     ax.tick_params(direction="in")
     ax.legend().set_visible(True)
-    plt.show()
+    if display_fig == True:
+        plt.show()
+    if save_fig == True:
+        save_fig_path = f"{data.path}/IsothermEpsEOSvExp_{time_str}.png"
+        plt.savefig(save_fig_path, dpi=1200, transparent=True)
+        print(f"Plot successfully exported to {save_fig_path}.")
 
 def plot_isotherm_pmv(base_obj, T_list:list[float], export_data:bool = False):
     """Function to plot sorption of EOS and experimental data to compare different partial molar volume approaches.
@@ -937,7 +943,7 @@ def plot_isotherm_epskl_EOS(base_obj, T_list: list, P_list: list, eps_list: list
     
     plt.show()
 
-def plot_isotherm_epskl_EOSvExp(base_obj, T_list: list, eps_list:list, export_data:bool=False):
+def plot_isotherm_epskl_EOSvExp(base_obj, T_list: list, eps_list:list, export_data:bool=False, display_fig:bool=True, save_fig:bool=False):
     """Functio to plot solubility isotherms for chosen eps_kl values at different 
 
     Args:
@@ -948,6 +954,8 @@ def plot_isotherm_epskl_EOSvExp(base_obj, T_list: list, eps_list:list, export_da
     """
     
     data = SolPolExpData(base_obj.sol, base_obj.pol)
+    now = datetime.now()  # current time
+    time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM    
     
     solubility_SAFT = []
     _df = {}
@@ -997,14 +1005,12 @@ def plot_isotherm_epskl_EOSvExp(base_obj, T_list: list, eps_list:list, export_da
             df = pd.concat([df,_df],ignore_index=True)
     print(df)
     
+    
     if export_data == True:
-        now = datetime.now()  # current time
-        time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM
-        path = os.path.dirname(__file__)
-        export_path = f"{path}/PlotIsothermEpsEOSvExp_{time_str}.xlsx"
-        with pd.ExcelWriter(export_path) as writer:
+        data_export_path = f"{data.path}/PlotIsothermEpsEOSvExp_{time_str}.xlsx"
+        with pd.ExcelWriter(data_export_path) as writer:
             df.to_excel(writer, index=False)
-        print("Data successfully exported to: ", export_path)
+        print("Data successfully exported to: ", data_export_path)
         
     fig = plt.figure(figsize=[8.0, 3.5])
     ax1 = fig.add_subplot(121)  # SAFT only
@@ -1032,7 +1038,13 @@ def plot_isotherm_epskl_EOSvExp(base_obj, T_list: list, eps_list:list, export_da
                              label=f"T = {T-273}°C") for i, T in enumerate(T_list)]
     legend = legend_colours + legend_markers
     ax2.legend(handles=legend)
-    plt.show()
+    
+    if display_fig == True:
+        plt.show()
+    if save_fig == True:
+        save_fig_path = f"{data.path}/IsothermEpsEOSvExp_{time_str}.png"
+        plt.savefig(save_fig_path, dpi=1200, transparent=True)
+        print(f"Plot successfully exported to {save_fig_path}.")
 
 if __name__ == "__main__":    
     mix = BaseSolPol("CO2","HDPE")
@@ -1053,7 +1065,13 @@ if __name__ == "__main__":
     #                   export_data=False)
     
     #* fit_epskl
-    fit_epskl(mix, T=25+273, x0=200, epskl_bounds=(50, 500))
+    # fit_epskl(mix, T=50+273, x0=200, epskl_bounds=(50, 500))
+    # mix.modify_kl(259.78)
+    plot_isotherm_EOSvExp(mix, T_list=[25+273], export_data=False, display_fig=False, save_fig=True)
+    # mix.modify_kl(244.23)
+    plot_isotherm_EOSvExp(mix, T_list=[35+273], export_data=False, display_fig=False, save_fig=True)
+    # mix.modify_kl(251.05)
+    plot_isotherm_EOSvExp(mix, T_list=[50+273], export_data=False, display_fig=False, save_fig=True)
     
     #* SW total
     # p = linspace(1,10e5,5)
@@ -1165,4 +1183,4 @@ if __name__ == "__main__":
     # ax.set_xlabel("p [bar]")
     # ax.set_ylabel("S_sc [g/g]")
     # ax.legend().set_visible(True)
-    # plt.show()    
+    # plt.show()
