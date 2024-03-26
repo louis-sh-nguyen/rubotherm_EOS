@@ -569,7 +569,7 @@ class SolPolExpData():
         df = pd.read_excel(self.file, sheet_name=f"{T-273}C")
         return df
 
-def fit_epskl(base_obj, T:float, x0: float = 200, epskl_bounds:tuple = (100, 500)):
+def fit_epskl(base_obj, T:float, x0: float = 200, epskl_bounds:tuple = (100, 500), **kwargs):
     """Function to fit eps_kl to fit SAFT prediction to corected experimental data.
 
     Args:
@@ -579,12 +579,17 @@ def fit_epskl(base_obj, T:float, x0: float = 200, epskl_bounds:tuple = (100, 500
         epskl_bounds (tuple, optional): Upper and lower bounds for eps_kl. Defaults to (100, 500).
 
     Returns:
-        _type_: _description_
+        epskl, fobj: tuple
     """
     
     data = SolPolExpData(base_obj.sol, base_obj.pol)
     _df=data.get_sorption_data(T)
     
+    if "pmv_method" in kwargs:
+        pmv_method = kwargs["pmv_method"]
+    else:
+        pmv_method = "1"
+        
     def fobj(var):
         eps = var
         print("eps = ", eps)
@@ -598,10 +603,10 @@ def fit_epskl(base_obj, T:float, x0: float = 200, epskl_bounds:tuple = (100, 500
         for j, _p in enumerate(P_list):
             # Create objects at each T and P
             if j == 0:
-                obj = DetailedSolPol(base_obj, T, _p,)
+                obj = DetailedSolPol(base_obj, T, _p, pmv_method=pmv_method)
             else:
                 x0_list = update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
-                obj = DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list,)
+                obj = DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list, pmv_method=pmv_method)
             
             # Solubility prediction from SAFT
             try:
@@ -630,6 +635,7 @@ def fit_epskl(base_obj, T:float, x0: float = 200, epskl_bounds:tuple = (100, 500
     
     print("Optimised value of eps: ", result.x)
     print("Objective function value at optimised: ", fobj(result.x))
+    return result.x, fobj(result.x)
 
 def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False, display_fig:bool=True, save_fig:bool=False):
     """Function to plot sorption of EOS and experimental data (not corrected for swelling).
@@ -884,7 +890,7 @@ def plot_isotherm_epskl_EOS(base_obj, T_list: list, P_list: list, eps_list: list
     """
     
     solubility = []
-    _df = {}
+    
     df = pd.DataFrame(columns=['T [K]', 'eps_kl', 'P [Pa]', 'S_sc [g/g]'])
     for T in T_list:
         for eps in eps_list:
@@ -957,8 +963,6 @@ def plot_isotherm_epskl_EOSvExp(base_obj, T_list: list, eps_list:list, export_da
     now = datetime.now()  # current time
     time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM    
     
-    solubility_SAFT = []
-    _df = {}
     df = pd.DataFrame(columns=['T [K]', 'eps_kl', 'P [Pa]', 'S_sc_SAFT [g/g]', 'S_sc_exp_corrected [g/g]'])
     for T in T_list:        
         _df1=data.get_sorption_data(T)
@@ -1017,7 +1021,7 @@ def plot_isotherm_epskl_EOSvExp(base_obj, T_list: list, eps_list:list, export_da
     ax2 = fig.add_subplot(122)  # corrected exp
     for i, T in enumerate(T_list):
         for j, eps in enumerate(eps_list):
-            #TODO try with pmv method 3
+            
             mask = (df['T [K]'] == T) & (df['eps_kl'] == eps)
             ax1.plot(df[mask]['P [Pa]']*1e-5, df[mask]['S_sc_SAFT [g/g]'], color=custom_colours[i+1], linestyle="solid", marker=custom_markers[j], label=f"{T-273}°C eps={eps}")
             ax2.plot(df[mask]['P [Pa]']*1e-5, df[mask]['S_sc_exp_corrected [g/g]'], color=custom_colours[i+1], linestyle="solid", marker=custom_markers[j], label=f"{T-273}°C eps={eps}")
@@ -1065,13 +1069,18 @@ if __name__ == "__main__":
     #                   export_data=False)
     
     #* fit_epskl
-    # fit_epskl(mix, T=50+273, x0=200, epskl_bounds=(50, 500))
+    eps25, fobj25 = fit_epskl(mix, T=25+273, x0=200, epskl_bounds=(50, 500), pmv_method = "3")
+    print(f"25°C, eps = {eps25}, fobj = {fobj25}")
+    eps35, fobj35 = fit_epskl(mix, T=35+273, x0=200, epskl_bounds=(50, 500), pmv_method = "3")
+    print(f"35°C, eps = {eps35}, fobj = {fobj35}")
+    eps50, fobj50 = fit_epskl(mix, T=50+273, x0=200, epskl_bounds=(50, 500), pmv_method = "3")
+    print(f"50°C, eps = {eps50}, fobj = {fobj50}")
     # mix.modify_kl(259.78)
-    plot_isotherm_EOSvExp(mix, T_list=[25+273], export_data=False, display_fig=False, save_fig=True)
+    # plot_isotherm_EOSvExp(mix, T_list=[25+273], export_data=False, display_fig=False, save_fig=True)
     # mix.modify_kl(244.23)
-    plot_isotherm_EOSvExp(mix, T_list=[35+273], export_data=False, display_fig=False, save_fig=True)
+    # plot_isotherm_EOSvExp(mix, T_list=[35+273], export_data=False, display_fig=False, save_fig=True)
     # mix.modify_kl(251.05)
-    plot_isotherm_EOSvExp(mix, T_list=[50+273], export_data=False, display_fig=False, save_fig=True)
+    # plot_isotherm_EOSvExp(mix, T_list=[50+273], export_data=False, display_fig=False, save_fig=True)
     
     #* SW total
     # p = linspace(1,10e5,5)
