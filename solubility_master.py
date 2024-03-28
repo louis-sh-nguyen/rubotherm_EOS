@@ -27,7 +27,7 @@ from matplotlib.lines import Line2D
 from colour import Color
 from numpy import *
 import pandas as pd
-from scipy.optimize import curve_fit, fsolve, minimize_scalar
+from scipy.optimize import fsolve, minimize_scalar
 
 
 
@@ -49,7 +49,7 @@ matplotlib.rcParams["figure.autolayout"] = True
 custom_colours = ["black","green","blue","red","purple","orange","brown","plum","indigo","olive","grey"]
 custom_markers = ["o", "x", "^", "*", "s", "D"]
 
-def update_x0_sol_list(previous_x0_sol:float, no_step:int=10, x0_sol_default_range=(0.9, 0.9999)):
+def update_x0_sol_list(previous_x0_sol:float, no_step:int=20, x0_sol_default_range=(0.0, 1.0)):
     if (previous_x0_sol is None) or (previous_x0_sol < 0.) or (previous_x0_sol > 1.):
         new_x0_list =  linspace(x0_sol_default_range[0], x0_sol_default_range[1], no_step).tolist()
     else:
@@ -345,7 +345,7 @@ class DetailedSolPol(BaseSolPol):
         """Function to calculate partial volume of solute in mixture, using pmv method 3.
         pmv method 3: assuming Vs and Vp at __infinitely dilution__, unchanged at atmospheric pressure.
         Unit = [m3/g]
-         
+        
         """
         T = self.T        
         V_s = self.V_sol(hstack([0., 1.]), T, 1e5)  # [m^3/g]        
@@ -403,6 +403,7 @@ class DetailedSolPol(BaseSolPol):
         rho_pol_cr = _rho_pol_cr *1e6   # [g/m^3]
         return rho_pol_cr    
     
+    # *Default
     def get_S_am(self, T: float, P: float):
         """Solve solubility in amorphous rubbery polymer at equilibrium.
         
@@ -420,41 +421,45 @@ class DetailedSolPol(BaseSolPol):
         # sol-pol mixture (EQ)
         def func(_x_1):
             _x = hstack([_x_1, 1 - _x_1])  # [mol/mol-mix]
-            _rhol = eos_mix.density(_x, T, P, "L")
+            #*Test block
+            # _rhol = eos_mix.density(_x, T, P, "L")    #*Default
+            _rhol = self.SinglePhaseDensity(_x, T, P)   #*Test
+            
             _rho_i = _x * _rhol  # [mol/m^3-mix]
             _muad_m = eos_mix.muad(_rho_i, T)  # dimensionless [mu/RT]
             _muad_s_m = _muad_m[0]      # dimensionless chemical potential of solute in sol-pol mixture
             return [_muad_s_m - muad_s_ext]
         
         x0_sol_single = self.options.get("x0_sol", None)
-        x0_sol_range = self.options.get("x0_sol_range", linspace(0.90, 0.999, 10).tolist())
-        # auto_iterate_x0 = self.options.get("auto_iterate_x0", False)
+        x0_sol_range = self.options.get("x0_sol_range", linspace(0.00, 1.0, 20).tolist())
         
         if x0_sol_single is None:
             x0_list = x0_sol_range
         else:
             x0_list = [x0_sol_single]
         
-        print("\n")
+        print("")
         print(f"T = {T} K, P = {P} Pa")
         for i, x0 in enumerate(x0_list):            
             try:
                 solution = fsolve(func, x0=float(x0_list[i]))
                 residue = func(_x_1=solution)
+                x_sol = solution[0]  # [mol-sol/mol-mix]
                 residue_float = [float(i) for i in residue]
-                if isclose(residue_float, [0.0]).all() == True:
-                    x_sol = solution[0]  # [mol-sol/mol-mix]
+                print(x_sol)
+                print(residue_float)
+                if isclose(residue_float, [0.0],rtol=0.0001).all() == True and x_sol >= 0 and x_sol <= 1:
                     omega_sol = (x_sol * MW_sol) / (x_sol * MW_sol + (1 - x_sol) * MW_pol)
                     solubility_gg = omega_sol / (1-omega_sol)
                     return solubility_gg
             except Exception as e:
-                print(f"Step {i+1}/{len(x0_list)+1} (x0={x0_list[i]}): ", e)
+                print(f"Step {i+1}/{len(x0_list)} (x0={x0_list[i]}): ", e)
             
-            if i >= (len(x0_list)):
+            if i+1 >= (len(x0_list)):
                 print("Failed to find solution within max iteractions number")
                 print("")
                 return None
-    
+
     ### DEPENDENT functions
     def get_rho_am(self):
         """Function to get density of amorphous domain of polymer.
@@ -522,7 +527,7 @@ class DetailedSolPol(BaseSolPol):
         """
         omega_c = self.omega_cr  # [g/g]
         rho_pol_cr = self.rho_pol_cr  # [g/m^3]
-        rho_pol_am = self.SinglePhaseDensity(array([0., 1.]), self.T, P=1)*self.MW_pol # [g/m^3]
+        rho_pol_am = self.SinglePhaseDensity(array([0., 1.]), self.T, P=1)*self.MW_pol # [g/m^3] #!check P=1
         rho_pol = 1 / ((1-omega_c)/rho_pol_am + omega_c/rho_pol_cr) # [g/m63]
         return rho_pol
 
@@ -569,7 +574,7 @@ class SolPolExpData():
         df = pd.read_excel(self.file, sheet_name=f"{T-273}C")
         return df
 
-def fit_epskl(base_obj, T:float, x0: float = 200, epskl_bounds:tuple = (100, 500)):
+def fit_epskl(base_obj, T:float, x0: float = 200, epskl_bounds:tuple = (100, 500), **kwargs):
     """Function to fit eps_kl to fit SAFT prediction to corected experimental data.
 
     Args:
@@ -579,12 +584,17 @@ def fit_epskl(base_obj, T:float, x0: float = 200, epskl_bounds:tuple = (100, 500
         epskl_bounds (tuple, optional): Upper and lower bounds for eps_kl. Defaults to (100, 500).
 
     Returns:
-        _type_: _description_
+        epskl, fobj: tuple
     """
     
     data = SolPolExpData(base_obj.sol, base_obj.pol)
     _df=data.get_sorption_data(T)
     
+    if "pmv_method" in kwargs:
+        pmv_method = kwargs["pmv_method"]
+    else:
+        pmv_method = "1"
+        
     def fobj(var):
         eps = var
         print("eps = ", eps)
@@ -598,10 +608,10 @@ def fit_epskl(base_obj, T:float, x0: float = 200, epskl_bounds:tuple = (100, 500
         for j, _p in enumerate(P_list):
             # Create objects at each T and P
             if j == 0:
-                obj = DetailedSolPol(base_obj, T, _p,)
+                obj = DetailedSolPol(base_obj, T, _p, pmv_method=pmv_method)
             else:
                 x0_list = update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
-                obj = DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list,)
+                obj = DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list, pmv_method=pmv_method)
             
             # Solubility prediction from SAFT
             try:
@@ -630,8 +640,9 @@ def fit_epskl(base_obj, T:float, x0: float = 200, epskl_bounds:tuple = (100, 500
     
     print("Optimised value of eps: ", result.x)
     print("Objective function value at optimised: ", fobj(result.x))
+    return result.x, fobj(result.x)
 
-def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False):
+def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False, display_fig:bool=True, save_fig:bool=False):
     """Function to plot sorption of EOS and experimental data (not corrected for swelling).
 
     Args:
@@ -641,6 +652,8 @@ def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False
         export_data (bool): export data.
     """
     data = SolPolExpData(base_obj.sol, base_obj.pol)
+    now = datetime.now()  # current time
+    time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM    
     
     df={}    
     P_SAFT={}
@@ -703,9 +716,8 @@ def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False
         print(df[T])
         print("")
     
+    
     if export_data == True:
-        now = datetime.now()  # current time
-        time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM
         export_path = f"{data.path}/PlotIsothermEOSvExp_{time_str}.xlsx"
         with pd.ExcelWriter(export_path) as writer:
             for T in T_list:
@@ -722,7 +734,12 @@ def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False
     ax.set_ylabel("S [g/g]")
     ax.tick_params(direction="in")
     ax.legend().set_visible(True)
-    plt.show()
+    if display_fig == True:
+        plt.show()
+    if save_fig == True:
+        save_fig_path = f"{data.path}/IsothermEpsEOSvExp_{time_str}.png"
+        plt.savefig(save_fig_path, dpi=1200, transparent=True)
+        print(f"Plot successfully exported to {save_fig_path}.")
 
 def plot_isotherm_pmv(base_obj, T_list:list[float], export_data:bool = False):
     """Function to plot sorption of EOS and experimental data to compare different partial molar volume approaches.
@@ -878,7 +895,7 @@ def plot_isotherm_epskl_EOS(base_obj, T_list: list, P_list: list, eps_list: list
     """
     
     solubility = []
-    _df = {}
+    
     df = pd.DataFrame(columns=['T [K]', 'eps_kl', 'P [Pa]', 'S_sc [g/g]'])
     for T in T_list:
         for eps in eps_list:
@@ -937,7 +954,7 @@ def plot_isotherm_epskl_EOS(base_obj, T_list: list, P_list: list, eps_list: list
     
     plt.show()
 
-def plot_isotherm_epskl_EOSvExp(base_obj, T_list: list, eps_list:list, export_data:bool=False):
+def plot_isotherm_epskl_EOSvExp(base_obj, T_list: list, eps_list:list, export_data:bool=False, display_fig:bool=True, save_fig:bool=False):
     """Functio to plot solubility isotherms for chosen eps_kl values at different 
 
     Args:
@@ -948,9 +965,9 @@ def plot_isotherm_epskl_EOSvExp(base_obj, T_list: list, eps_list:list, export_da
     """
     
     data = SolPolExpData(base_obj.sol, base_obj.pol)
+    now = datetime.now()  # current time
+    time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM    
     
-    solubility_SAFT = []
-    _df = {}
     df = pd.DataFrame(columns=['T [K]', 'eps_kl', 'P [Pa]', 'S_sc_SAFT [g/g]', 'S_sc_exp_corrected [g/g]'])
     for T in T_list:        
         _df1=data.get_sorption_data(T)
@@ -997,21 +1014,19 @@ def plot_isotherm_epskl_EOSvExp(base_obj, T_list: list, eps_list:list, export_da
             df = pd.concat([df,_df],ignore_index=True)
     print(df)
     
+    
     if export_data == True:
-        now = datetime.now()  # current time
-        time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM
-        path = os.path.dirname(__file__)
-        export_path = f"{path}/PlotIsothermEpsEOSvExp_{time_str}.xlsx"
-        with pd.ExcelWriter(export_path) as writer:
+        data_export_path = f"{data.path}/PlotIsothermEpsEOSvExp_{time_str}.xlsx"
+        with pd.ExcelWriter(data_export_path) as writer:
             df.to_excel(writer, index=False)
-        print("Data successfully exported to: ", export_path)
+        print("Data successfully exported to: ", data_export_path)
         
     fig = plt.figure(figsize=[8.0, 3.5])
     ax1 = fig.add_subplot(121)  # SAFT only
     ax2 = fig.add_subplot(122)  # corrected exp
     for i, T in enumerate(T_list):
         for j, eps in enumerate(eps_list):
-            #TODO try with pmv method 3
+            
             mask = (df['T [K]'] == T) & (df['eps_kl'] == eps)
             ax1.plot(df[mask]['P [Pa]']*1e-5, df[mask]['S_sc_SAFT [g/g]'], color=custom_colours[i+1], linestyle="solid", marker=custom_markers[j], label=f"{T-273}°C eps={eps}")
             ax2.plot(df[mask]['P [Pa]']*1e-5, df[mask]['S_sc_exp_corrected [g/g]'], color=custom_colours[i+1], linestyle="solid", marker=custom_markers[j], label=f"{T-273}°C eps={eps}")
@@ -1032,10 +1047,20 @@ def plot_isotherm_epskl_EOSvExp(base_obj, T_list: list, eps_list:list, export_da
                              label=f"T = {T-273}°C") for i, T in enumerate(T_list)]
     legend = legend_colours + legend_markers
     ax2.legend(handles=legend)
-    plt.show()
+    
+    if display_fig == True:
+        plt.show()
+    if save_fig == True:
+        save_fig_path = f"{data.path}/IsothermEpsEOSvExp_{time_str}.png"
+        plt.savefig(save_fig_path, dpi=1200, transparent=True)
+        print(f"Plot successfully exported to {save_fig_path}.")
 
 if __name__ == "__main__":    
     mix = BaseSolPol("CO2","HDPE")
+    obj=DetailedSolPol(mix,25+273,1e6)
+    print("S_am = ", obj.S_am)
+    print("x_am = ", obj.x_am)
+    print("omaga_am = ", obj.omega_am)
     # mix.pmv_method = "2"
     
     # plot_isotherm_EOSvExp(mix,[25+273, 35+273, 50+273],export_data="True")
@@ -1053,7 +1078,18 @@ if __name__ == "__main__":
     #                   export_data=False)
     
     #* fit_epskl
-    fit_epskl(mix, T=25+273, x0=200, epskl_bounds=(50, 500))
+    # eps25, fobj25 = fit_epskl(mix, T=25+273, x0=200, epskl_bounds=(50, 500), pmv_method = "3")
+    # print(f"25°C, eps = {eps25}, fobj = {fobj25}")
+    # eps35, fobj35 = fit_epskl(mix, T=35+273, x0=200, epskl_bounds=(50, 500), pmv_method = "3")
+    # print(f"35°C, eps = {eps35}, fobj = {fobj35}")
+    # eps50, fobj50 = fit_epskl(mix, T=50+273, x0=200, epskl_bounds=(50, 500), pmv_method = "3")
+    # print(f"50°C, eps = {eps50}, fobj = {fobj50}")
+    # mix.modify_kl(259.78)
+    # plot_isotherm_EOSvExp(mix, T_list=[25+273], export_data=False, display_fig=False, save_fig=True)
+    # mix.modify_kl(244.23)
+    # plot_isotherm_EOSvExp(mix, T_list=[35+273], export_data=False, display_fig=False, save_fig=True)
+    # mix.modify_kl(251.05)
+    # plot_isotherm_EOSvExp(mix, T_list=[50+273], export_data=False, display_fig=False, save_fig=True)
     
     #* SW total
     # p = linspace(1,10e5,5)
@@ -1165,4 +1201,4 @@ if __name__ == "__main__":
     # ax.set_xlabel("p [bar]")
     # ax.set_ylabel("S_sc [g/g]")
     # ax.legend().set_visible(True)
-    # plt.show()    
+    # plt.show()
