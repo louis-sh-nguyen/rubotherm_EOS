@@ -49,7 +49,7 @@ matplotlib.rcParams["figure.autolayout"] = True
 custom_colours = ["black","green","blue","red","purple","orange","brown","plum","indigo","olive","grey"]
 custom_markers = ["o", "x", "^", "*", "s", "D"]
 
-def update_x0_sol_list(previous_x0_sol:float, no_step:int=30, x0_sol_default_range=(1e-6, 0.99999999)):
+def update_x0_sol_list(previous_x0_sol:float, no_step:int=20, x0_sol_default_range=(0.0, 1.0)):
     if (previous_x0_sol is None) or (previous_x0_sol < 0.) or (previous_x0_sol > 1.):
         new_x0_list =  linspace(x0_sol_default_range[0], x0_sol_default_range[1], no_step).tolist()
     else:
@@ -403,6 +403,7 @@ class DetailedSolPol(BaseSolPol):
         rho_pol_cr = _rho_pol_cr *1e6   # [g/m^3]
         return rho_pol_cr    
     
+    # *Default
     def get_S_am(self, T: float, P: float):
         """Solve solubility in amorphous rubbery polymer at equilibrium.
         
@@ -420,8 +421,7 @@ class DetailedSolPol(BaseSolPol):
         # sol-pol mixture (EQ)
         def func(_x_1):
             _x = hstack([_x_1, 1 - _x_1])  # [mol/mol-mix]
-            _rhol = self.SinglePhaseDensity(_x, T, P)   
-            
+            _rhol = self.SinglePhaseDensity(_x, T, P)               
             _rho_i = _x * _rhol  # [mol/m^3-mix]
             _muad_m = eos_mix.muad(_rho_i, T)  # dimensionless [mu/RT]
             _muad_s_m = _muad_m[0]      # dimensionless chemical potential of solute in sol-pol mixture
@@ -444,11 +444,7 @@ class DetailedSolPol(BaseSolPol):
                 residue = func(_x_1=solution)
                 x_sol = solution[0]  # [mol-sol/mol-mix]
                 residue_float = [float(i) for i in residue]
-                
-                # if isclose(residue_float, [0.0], rtol=0.01).all() == True and x_sol >= 0 and x_sol <= 1: #*Original
-                if isclose(residue_float, [0.0]).all() == True:    #*TEST
-                    # print(x_sol)
-                    # TODO sovle issues with this bound check. Caused by in adequate x0 for fsolve.
+                if isclose(residue_float, [0.0]).all() == True:   
                     if x_sol > 1:
                         raise Exception("x > 1")
                     elif x_sol < 0:
@@ -464,6 +460,7 @@ class DetailedSolPol(BaseSolPol):
         print("Failed to find solution within max iteractions number")
         print("")
         return None
+
 
     ### DEPENDENT functions
     def get_rho_am(self):
@@ -1066,6 +1063,7 @@ if __name__ == "__main__":
     # print("S_am = ", obj.S_am)
     # print("x_am = ", obj.x_am)
     # print("omaga_am = ", obj.omega_am)
+
     # mix.pmv_method = "2"
     
     # plot_isotherm_EOSvExp(mix,[25+273, 35+273, 50+273], export_data=False, display_fig=True, save_fig=False)
@@ -1106,6 +1104,7 @@ if __name__ == "__main__":
     print(f"25°C, eps = {eps25_pmv3}, fobj = {fobj25_pmv3}")
     print(f"35°C, eps = {eps35_pmv3}, fobj = {fobj35_pmv3}")
     print(f"50°C, eps = {eps50_pmv3}, fobj = {fobj50_pmv3}")
+
     # mix.modify_kl(259.78)
     # plot_isotherm_EOSvExp(mix, T_list=[25+273], export_data=False, display_fig=False, save_fig=True)
     # mix.modify_kl(244.23)
