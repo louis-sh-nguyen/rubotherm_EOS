@@ -27,7 +27,7 @@ from matplotlib.lines import Line2D
 from colour import Color
 from numpy import *
 import pandas as pd
-from scipy.optimize import curve_fit, fsolve, minimize_scalar
+from scipy.optimize import fsolve, minimize_scalar
 
 
 
@@ -49,7 +49,7 @@ matplotlib.rcParams["figure.autolayout"] = True
 custom_colours = ["black","green","blue","red","purple","orange","brown","plum","indigo","olive","grey"]
 custom_markers = ["o", "x", "^", "*", "s", "D"]
 
-def update_x0_sol_list(previous_x0_sol:float, no_step:int=10, x0_sol_default_range=(0.9, 0.9999)):
+def update_x0_sol_list(previous_x0_sol:float, no_step:int=30, x0_sol_default_range=(1e-6, 0.99999999)):
     if (previous_x0_sol is None) or (previous_x0_sol < 0.) or (previous_x0_sol > 1.):
         new_x0_list =  linspace(x0_sol_default_range[0], x0_sol_default_range[1], no_step).tolist()
     else:
@@ -345,7 +345,7 @@ class DetailedSolPol(BaseSolPol):
         """Function to calculate partial volume of solute in mixture, using pmv method 3.
         pmv method 3: assuming Vs and Vp at __infinitely dilution__, unchanged at atmospheric pressure.
         Unit = [m3/g]
-         
+        
         """
         T = self.T        
         V_s = self.V_sol(hstack([0., 1.]), T, 1e5)  # [m^3/g]        
@@ -420,41 +420,51 @@ class DetailedSolPol(BaseSolPol):
         # sol-pol mixture (EQ)
         def func(_x_1):
             _x = hstack([_x_1, 1 - _x_1])  # [mol/mol-mix]
-            _rhol = eos_mix.density(_x, T, P, "L")
+            _rhol = self.SinglePhaseDensity(_x, T, P)   
+            
             _rho_i = _x * _rhol  # [mol/m^3-mix]
             _muad_m = eos_mix.muad(_rho_i, T)  # dimensionless [mu/RT]
             _muad_s_m = _muad_m[0]      # dimensionless chemical potential of solute in sol-pol mixture
             return [_muad_s_m - muad_s_ext]
         
         x0_sol_single = self.options.get("x0_sol", None)
-        x0_sol_range = self.options.get("x0_sol_range", linspace(0.90, 0.999, 10).tolist())
-        # auto_iterate_x0 = self.options.get("auto_iterate_x0", False)
+        x0_sol_range = self.options.get("x0_sol_range", linspace(1e-6, 0.99999999, 30).tolist())
         
         if x0_sol_single is None:
             x0_list = x0_sol_range
         else:
             x0_list = [x0_sol_single]
         
-        print("\n")
+        print("")
         print(f"T = {T} K, P = {P} Pa")
         for i, x0 in enumerate(x0_list):            
+            # print(f"i = {i}") 
             try:
                 solution = fsolve(func, x0=float(x0_list[i]))
                 residue = func(_x_1=solution)
+                x_sol = solution[0]  # [mol-sol/mol-mix]
                 residue_float = [float(i) for i in residue]
-                if isclose(residue_float, [0.0]).all() == True:
-                    x_sol = solution[0]  # [mol-sol/mol-mix]
-                    omega_sol = (x_sol * MW_sol) / (x_sol * MW_sol + (1 - x_sol) * MW_pol)
-                    solubility_gg = omega_sol / (1-omega_sol)
-                    return solubility_gg
+                
+                # if isclose(residue_float, [0.0], rtol=0.01).all() == True and x_sol >= 0 and x_sol <= 1: #*Original
+                if isclose(residue_float, [0.0]).all() == True:    #*TEST
+                    # print(x_sol)
+                    # TODO sovle issues with this bound check. Caused by in adequate x0 for fsolve.
+                    if x_sol > 1:
+                        raise Exception("x > 1")
+                    elif x_sol < 0:
+                        raise Exception("x < 0")                        
+                    else:
+                        omega_sol = (x_sol * MW_sol) / (x_sol * MW_sol + (1 - x_sol) * MW_pol)
+                        solubility_gg = omega_sol / (1-omega_sol)
+                        return solubility_gg
             except Exception as e:
-                print(f"Step {i+1}/{len(x0_list)+1} (x0={x0_list[i]}): ", e)
+                print(f"Step {i+1}/{len(x0_list)} (x0={x0_list[i]}): ", e)
             
-            if i >= (len(x0_list)):
-                print("Failed to find solution within max iteractions number")
-                print("")
-                return None
-    
+            
+        print("Failed to find solution within max iteractions number")
+        print("")
+        return None
+
     ### DEPENDENT functions
     def get_rho_am(self):
         """Function to get density of amorphous domain of polymer.
@@ -522,7 +532,7 @@ class DetailedSolPol(BaseSolPol):
         """
         omega_c = self.omega_cr  # [g/g]
         rho_pol_cr = self.rho_pol_cr  # [g/m^3]
-        rho_pol_am = self.SinglePhaseDensity(array([0., 1.]), self.T, P=1)*self.MW_pol # [g/m^3]
+        rho_pol_am = self.SinglePhaseDensity(array([0., 1.]), self.T, P=1)*self.MW_pol # [g/m^3] #!check P=1
         rho_pol = 1 / ((1-omega_c)/rho_pol_am + omega_c/rho_pol_cr) # [g/m63]
         return rho_pol
 
@@ -1052,9 +1062,13 @@ def plot_isotherm_epskl_EOSvExp(base_obj, T_list: list, eps_list:list, export_da
 
 if __name__ == "__main__":    
     mix = BaseSolPol("CO2","HDPE")
+    # obj=DetailedSolPol(mix,25+273,1e6)
+    # print("S_am = ", obj.S_am)
+    # print("x_am = ", obj.x_am)
+    # print("omaga_am = ", obj.omega_am)
     # mix.pmv_method = "2"
     
-    # plot_isotherm_EOSvExp(mix,[25+273, 35+273, 50+273],export_data="True")
+    # plot_isotherm_EOSvExp(mix,[25+273, 35+273, 50+273], export_data=False, display_fig=True, save_fig=False)
     # plot_isotherm_pmv(mix, [50+273,], export_data=False)
     # plot_VsVp_pmv(mix, 50+273)    
     
@@ -1068,13 +1082,30 @@ if __name__ == "__main__":
     #                   eps_list=[276.45, 276.45*0.95, 276.45*1.05], 
     #                   export_data=False)
     
-    #* fit_epskl
-    eps25, fobj25 = fit_epskl(mix, T=25+273, x0=200, epskl_bounds=(50, 500), pmv_method = "3")
-    print(f"25°C, eps = {eps25}, fobj = {fobj25}")
-    eps35, fobj35 = fit_epskl(mix, T=35+273, x0=200, epskl_bounds=(50, 500), pmv_method = "3")
-    print(f"35°C, eps = {eps35}, fobj = {fobj35}")
-    eps50, fobj50 = fit_epskl(mix, T=50+273, x0=200, epskl_bounds=(50, 500), pmv_method = "3")
-    print(f"50°C, eps = {eps50}, fobj = {fobj50}")
+    #* fit_epskl    
+    eps25_pmv1, fobj25_pmv1 = fit_epskl(mix, T=25+273, x0=200, epskl_bounds=(200, 300), pmv_method = "1")
+    eps35_pmv1, fobj35_pmv1 = fit_epskl(mix, T=35+273, x0=200, epskl_bounds=(200, 300), pmv_method = "1")
+    eps50_pmv1, fobj50_pmv1 = fit_epskl(mix, T=50+273, x0=200, epskl_bounds=(200, 300), pmv_method = "1")
+    
+    eps25_pmv2, fobj25_pmv2 = fit_epskl(mix, T=25+273, x0=200, epskl_bounds=(200, 300), pmv_method = "2")
+    eps35_pmv2, fobj35_pmv2 = fit_epskl(mix, T=35+273, x0=200, epskl_bounds=(200, 300), pmv_method = "2")
+    eps50_pmv2, fobj50_pmv2 = fit_epskl(mix, T=50+273, x0=200, epskl_bounds=(200, 300), pmv_method = "2")
+    
+    eps25_pmv3, fobj25_pmv3 = fit_epskl(mix, T=25+273, x0=200, epskl_bounds=(200, 300), pmv_method = "3")
+    eps35_pmv3, fobj35_pmv3 = fit_epskl(mix, T=35+273, x0=200, epskl_bounds=(200, 300), pmv_method = "3")
+    eps50_pmv3, fobj50_pmv3 = fit_epskl(mix, T=50+273, x0=200, epskl_bounds=(200, 300), pmv_method = "3")
+    print("pmv 1")
+    print(f"25°C, eps = {eps25_pmv1}, fobj = {fobj25_pmv1}")
+    print(f"35°C, eps = {eps35_pmv1}, fobj = {fobj35_pmv1}")
+    print(f"50°C, eps = {eps50_pmv1}, fobj = {fobj50_pmv1}")    
+    print("pmv 2")
+    print(f"25°C, eps = {eps25_pmv2}, fobj = {fobj25_pmv2}")
+    print(f"35°C, eps = {eps35_pmv2}, fobj = {fobj35_pmv2}")
+    print(f"50°C, eps = {eps50_pmv2}, fobj = {fobj50_pmv2}")
+    print("pmv 3")
+    print(f"25°C, eps = {eps25_pmv3}, fobj = {fobj25_pmv3}")
+    print(f"35°C, eps = {eps35_pmv3}, fobj = {fobj35_pmv3}")
+    print(f"50°C, eps = {eps50_pmv3}, fobj = {fobj50_pmv3}")
     # mix.modify_kl(259.78)
     # plot_isotherm_EOSvExp(mix, T_list=[25+273], export_data=False, display_fig=False, save_fig=True)
     # mix.modify_kl(244.23)
