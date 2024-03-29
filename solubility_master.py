@@ -421,17 +421,14 @@ class DetailedSolPol(BaseSolPol):
         # sol-pol mixture (EQ)
         def func(_x_1):
             _x = hstack([_x_1, 1 - _x_1])  # [mol/mol-mix]
-            #*Test block
-            # _rhol = eos_mix.density(_x, T, P, "L")    #*Default
-            _rhol = self.SinglePhaseDensity(_x, T, P)   #*Test
-            
+            _rhol = self.SinglePhaseDensity(_x, T, P)               
             _rho_i = _x * _rhol  # [mol/m^3-mix]
             _muad_m = eos_mix.muad(_rho_i, T)  # dimensionless [mu/RT]
             _muad_s_m = _muad_m[0]      # dimensionless chemical potential of solute in sol-pol mixture
             return [_muad_s_m - muad_s_ext]
         
         x0_sol_single = self.options.get("x0_sol", None)
-        x0_sol_range = self.options.get("x0_sol_range", linspace(0.00, 1.0, 20).tolist())
+        x0_sol_range = self.options.get("x0_sol_range", linspace(1e-6, 0.99999999, 30).tolist())
         
         if x0_sol_single is None:
             x0_list = x0_sol_range
@@ -441,24 +438,29 @@ class DetailedSolPol(BaseSolPol):
         print("")
         print(f"T = {T} K, P = {P} Pa")
         for i, x0 in enumerate(x0_list):            
+            # print(f"i = {i}") 
             try:
                 solution = fsolve(func, x0=float(x0_list[i]))
                 residue = func(_x_1=solution)
                 x_sol = solution[0]  # [mol-sol/mol-mix]
                 residue_float = [float(i) for i in residue]
-                print(x_sol)
-                print(residue_float)
-                if isclose(residue_float, [0.0],rtol=0.0001).all() == True and x_sol >= 0 and x_sol <= 1:
-                    omega_sol = (x_sol * MW_sol) / (x_sol * MW_sol + (1 - x_sol) * MW_pol)
-                    solubility_gg = omega_sol / (1-omega_sol)
-                    return solubility_gg
+                if isclose(residue_float, [0.0]).all() == True:   
+                    if x_sol > 1:
+                        raise Exception("x > 1")
+                    elif x_sol < 0:
+                        raise Exception("x < 0")                        
+                    else:
+                        omega_sol = (x_sol * MW_sol) / (x_sol * MW_sol + (1 - x_sol) * MW_pol)
+                        solubility_gg = omega_sol / (1-omega_sol)
+                        return solubility_gg
             except Exception as e:
                 print(f"Step {i+1}/{len(x0_list)} (x0={x0_list[i]}): ", e)
             
-            if i+1 >= (len(x0_list)):
-                print("Failed to find solution within max iteractions number")
-                print("")
-                return None
+            
+        print("Failed to find solution within max iteractions number")
+        print("")
+        return None
+
 
     ### DEPENDENT functions
     def get_rho_am(self):
@@ -1057,13 +1059,14 @@ def plot_isotherm_epskl_EOSvExp(base_obj, T_list: list, eps_list:list, export_da
 
 if __name__ == "__main__":    
     mix = BaseSolPol("CO2","HDPE")
-    obj=DetailedSolPol(mix,25+273,1e6)
-    print("S_am = ", obj.S_am)
-    print("x_am = ", obj.x_am)
-    print("omaga_am = ", obj.omega_am)
+    # obj=DetailedSolPol(mix,25+273,1e6)
+    # print("S_am = ", obj.S_am)
+    # print("x_am = ", obj.x_am)
+    # print("omaga_am = ", obj.omega_am)
+
     # mix.pmv_method = "2"
     
-    # plot_isotherm_EOSvExp(mix,[25+273, 35+273, 50+273],export_data="True")
+    # plot_isotherm_EOSvExp(mix,[25+273, 35+273, 50+273], export_data=False, display_fig=True, save_fig=False)
     # plot_isotherm_pmv(mix, [50+273,], export_data=False)
     # plot_VsVp_pmv(mix, 50+273)    
     
@@ -1077,13 +1080,31 @@ if __name__ == "__main__":
     #                   eps_list=[276.45, 276.45*0.95, 276.45*1.05], 
     #                   export_data=False)
     
-    #* fit_epskl
-    # eps25, fobj25 = fit_epskl(mix, T=25+273, x0=200, epskl_bounds=(50, 500), pmv_method = "3")
-    # print(f"25°C, eps = {eps25}, fobj = {fobj25}")
-    # eps35, fobj35 = fit_epskl(mix, T=35+273, x0=200, epskl_bounds=(50, 500), pmv_method = "3")
-    # print(f"35°C, eps = {eps35}, fobj = {fobj35}")
-    # eps50, fobj50 = fit_epskl(mix, T=50+273, x0=200, epskl_bounds=(50, 500), pmv_method = "3")
-    # print(f"50°C, eps = {eps50}, fobj = {fobj50}")
+    #* fit_epskl    
+    eps25_pmv1, fobj25_pmv1 = fit_epskl(mix, T=25+273, x0=200, epskl_bounds=(200, 300), pmv_method = "1")
+    eps35_pmv1, fobj35_pmv1 = fit_epskl(mix, T=35+273, x0=200, epskl_bounds=(200, 300), pmv_method = "1")
+    eps50_pmv1, fobj50_pmv1 = fit_epskl(mix, T=50+273, x0=200, epskl_bounds=(200, 300), pmv_method = "1")
+    
+    eps25_pmv2, fobj25_pmv2 = fit_epskl(mix, T=25+273, x0=200, epskl_bounds=(200, 300), pmv_method = "2")
+    eps35_pmv2, fobj35_pmv2 = fit_epskl(mix, T=35+273, x0=200, epskl_bounds=(200, 300), pmv_method = "2")
+    eps50_pmv2, fobj50_pmv2 = fit_epskl(mix, T=50+273, x0=200, epskl_bounds=(200, 300), pmv_method = "2")
+    
+    eps25_pmv3, fobj25_pmv3 = fit_epskl(mix, T=25+273, x0=200, epskl_bounds=(200, 300), pmv_method = "3")
+    eps35_pmv3, fobj35_pmv3 = fit_epskl(mix, T=35+273, x0=200, epskl_bounds=(200, 300), pmv_method = "3")
+    eps50_pmv3, fobj50_pmv3 = fit_epskl(mix, T=50+273, x0=200, epskl_bounds=(200, 300), pmv_method = "3")
+    print("pmv 1")
+    print(f"25°C, eps = {eps25_pmv1}, fobj = {fobj25_pmv1}")
+    print(f"35°C, eps = {eps35_pmv1}, fobj = {fobj35_pmv1}")
+    print(f"50°C, eps = {eps50_pmv1}, fobj = {fobj50_pmv1}")    
+    print("pmv 2")
+    print(f"25°C, eps = {eps25_pmv2}, fobj = {fobj25_pmv2}")
+    print(f"35°C, eps = {eps35_pmv2}, fobj = {fobj35_pmv2}")
+    print(f"50°C, eps = {eps50_pmv2}, fobj = {fobj50_pmv2}")
+    print("pmv 3")
+    print(f"25°C, eps = {eps25_pmv3}, fobj = {fobj25_pmv3}")
+    print(f"35°C, eps = {eps35_pmv3}, fobj = {fobj35_pmv3}")
+    print(f"50°C, eps = {eps50_pmv3}, fobj = {fobj50_pmv3}")
+
     # mix.modify_kl(259.78)
     # plot_isotherm_EOSvExp(mix, T_list=[25+273], export_data=False, display_fig=False, save_fig=True)
     # mix.modify_kl(244.23)
