@@ -16,7 +16,6 @@ T_list = [25+273, 35+273, 50+273]
 # P_list = linspace(1, 100, 10)     # [Pa]
 P_list = linspace(1, 200e5, 50)     # [Pa]
 
-
 V_fromPmv = {}
 V_fromSAFT = {}
 Vmolar_fromPmv = {}
@@ -104,7 +103,7 @@ with pd.ExcelWriter(export_path) as writer:
     df.to_excel(writer, index=False)
 print("Data successfully exported to: ", export_path)
 
-#* V am per g po am comparison
+#* V am per g pol am comparison
 fig = plt.figure()
 ax = fig.add_subplot(111)
 for i, T in enumerate(T_list):
@@ -120,8 +119,8 @@ ax = fig.add_subplot(111)
 for i, T in enumerate(T_list):
     ax.plot(P_list*1e-5, Vmolar_fromPmv[T], color=S.custom_colours[i], linestyle="solid", label = f"{T-273}°C from Vs and Vp")
     ax.plot(P_list*1e-5, Vmolar_fromSAFT[T], color=S.custom_colours[i], linestyle="dashed", label = f"{T-273}°C from SAFT prediction")
-ax.set(xlabel='P [bar]', ylabel=r"$\hat{V}_{am}$ [$m^{3}$/mol]",
-       title=r"Comparison of moar amorphous volume $\hat{V}_{am}$")
+ax.set(xlabel='P [bar]', ylabel=r"$\bar{V}_{am}$ [$m^{3}$/mol]",
+       title=r"Comparison of moar amorphous volume $\bar{V}_{am}$")
 ax.set_yscale('log')
 ax.legend().set_visible(True)
 
