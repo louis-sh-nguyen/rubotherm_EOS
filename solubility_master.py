@@ -47,9 +47,9 @@ matplotlib.rcParams["grid.linewidth"] = 0.15  # in point units
 matplotlib.rcParams["figure.autolayout"] = True
 
 custom_colours = ["black","green","blue","red","purple","orange","brown","plum","indigo","olive","grey"]
-custom_markers = ["o", "x", "^", "*", "s", "D"]
+custom_markers = ["o", "x", "^", "*", "s", "D", "."]
 
-def update_x0_sol_list(previous_x0_sol:float, no_step:int=20, x0_sol_default_range=(0.0, 1.0)):
+def update_x0_sol_list(previous_x0_sol:float, no_step:int=30, x0_sol_default_range=(1e-6, 0.99999999)):
     if (previous_x0_sol is None) or (previous_x0_sol < 0.) or (previous_x0_sol > 1.):
         new_x0_list =  linspace(x0_sol_default_range[0], x0_sol_default_range[1], no_step).tolist()
     else:
@@ -403,7 +403,6 @@ class DetailedSolPol(BaseSolPol):
         rho_pol_cr = _rho_pol_cr *1e6   # [g/m^3]
         return rho_pol_cr    
     
-    # *Default
     def get_S_am(self, T: float, P: float):
         """Solve solubility in amorphous rubbery polymer at equilibrium.
         
@@ -421,7 +420,8 @@ class DetailedSolPol(BaseSolPol):
         # sol-pol mixture (EQ)
         def func(_x_1):
             _x = hstack([_x_1, 1 - _x_1])  # [mol/mol-mix]
-            _rhol = self.SinglePhaseDensity(_x, T, P)               
+            _rhol = self.SinglePhaseDensity(_x, T, P)   
+            
             _rho_i = _x * _rhol  # [mol/m^3-mix]
             _muad_m = eos_mix.muad(_rho_i, T)  # dimensionless [mu/RT]
             _muad_s_m = _muad_m[0]      # dimensionless chemical potential of solute in sol-pol mixture
@@ -444,7 +444,11 @@ class DetailedSolPol(BaseSolPol):
                 residue = func(_x_1=solution)
                 x_sol = solution[0]  # [mol-sol/mol-mix]
                 residue_float = [float(i) for i in residue]
-                if isclose(residue_float, [0.0]).all() == True:   
+                
+                # if isclose(residue_float, [0.0], rtol=0.01).all() == True and x_sol >= 0 and x_sol <= 1: #*Original
+                if isclose(residue_float, [0.0]).all() == True:    #*TEST
+                    # print(x_sol)
+                    # TODO sovle issues with this bound check. Caused by in adequate x0 for fsolve.
                     if x_sol > 1:
                         raise Exception("x > 1")
                     elif x_sol < 0:
@@ -460,7 +464,6 @@ class DetailedSolPol(BaseSolPol):
         print("Failed to find solution within max iteractions number")
         print("")
         return None
-
 
     ### DEPENDENT functions
     def get_rho_am(self):
@@ -655,12 +658,26 @@ def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False
     """
     data = SolPolExpData(base_obj.sol, base_obj.pol)
     now = datetime.now()  # current time
-    time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM    
+    time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM
     
-    df={}    
     P_SAFT={}
     S_SAFT={}
     
+    # Finding largest pressure value in experimental data
+    _df = {}
+    for i, T in enumerate(T_list):    
+        _df[T]=data.get_sorption_data(T)
+        max_i = _df[T]["P[bar]"].max()
+        if i == 0:
+            pbar_max = max_i
+        else:
+            pbar_max = max(pbar_max, max_i)
+    
+    # Set pressure ponits for SAFT predictions
+    for i, T in enumerate(T_list):
+        P_SAFT[T] = linspace(1, pbar_max*1e5, 100)  # [Pa]    
+    
+    df={}
     for i, T in enumerate(T_list):
         
         _df=data.get_sorption_data(T)
@@ -688,8 +705,7 @@ def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False
         
         # Calculate S_sc for continuous SAFT line        
         objects = []
-        S_SAFT[T] = []
-        P_SAFT[T] = linspace(_df["P[bar]"].values[0],_df["P[bar]"].values[-1], 30) * 1e5   # [Pa]
+        S_SAFT[T] = []        
         for j, _p in enumerate(P_SAFT[T]):
             if j == 0:
                 obj = DetailedSolPol(base_obj, T, _p,)
@@ -729,8 +745,8 @@ def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False
     fig = plt.figure()
     ax = fig.add_subplot(111)
     for i, T in enumerate(T_list):
-        ax.plot(df[T]["P[bar]"],df[T]['S_exp_woSW[g/g]'],color=custom_colours[i], linestyle="None", marker="o",label=f"{T-273}°C exp - swelling uncorrected")
-        ax.plot(df[T]["P[bar]"],df[T]['S_exp_SW[g/g]'],color=custom_colours[i], linestyle="None", marker="x",label=f"{T-273}°C exp - swelling corrected")
+        ax.plot(df[T]["P[bar]"],df[T]['S_exp_woSW[g/g]'],color=custom_colours[i], linestyle="None", marker="o",label=f"{T-273}°C exp - uncorrected")
+        ax.plot(df[T]["P[bar]"],df[T]['S_exp_SW[g/g]'],color=custom_colours[i], linestyle="None", marker="x",label=f"{T-273}°C exp - corrected")
         ax.plot(P_SAFT[T]*1e-5,S_SAFT[T],color=custom_colours[i], linestyle="solid",marker="None",label=f"{T-273}°C SAFT")
     ax.set_xlabel("P [bar]")
     ax.set_ylabel("S [g/g]")
@@ -851,39 +867,90 @@ def plot_isotherm_pmv(base_obj, T_list:list[float], export_data:bool = False):
     ax.legend().set_visible(True)
     plt.show()
 
-def plot_VsVp_pmv(base_obj, T: float):
+def plot_VsVp_pmv(base_obj, T: float, display_fig:bool=True, save_fig:bool=False):
     """Function to plot partial molar volume isotherms at single temperature.
 
     Args:
         spm (class object): class object representing the sol-pol mixture.
         T (float): temperature [K].  
     """
+    now = datetime.now()  # current time
+    time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM    
+    
     data = SolPolExpData(base_obj.sol, base_obj.pol)    
     _df=data.get_sorption_data(T)
-    p = linspace(1, _df["P[bar]"].values[-1]*1e5, 10) #[Pa]
-    Vs_pmv1, Vp_pmv1 = zip(*[DetailedSolPol(base_obj, T, _p).Vs_Vp_pmv1() for _p in p])
-    Vs_pmv2, Vp_pmv2 = zip(*[DetailedSolPol(base_obj, T, _p).Vs_Vp_pmv2() for _p in p])
-    Vs_pmv3, Vp_pmv3 = zip(*[DetailedSolPol(base_obj, T, _p).Vs_Vp_pmv3() for _p in p])
-        
-    fig = plt.figure(figsize=[4.0, 7])
-    ax1 = fig.add_subplot(211)
-    ax1.plot(p*1e-5, Vs_pmv1, color=custom_colours[1], linestyle="solid", marker="None", label=f"{T-273}°C pmv1")
-    ax1.plot(p*1e-5, Vs_pmv2, color=custom_colours[2], linestyle="solid", marker="None", label=f"{T-273}°C pmv2")
-    ax1.plot(p*1e-5, Vs_pmv3, color=custom_colours[3], linestyle="solid", marker="None", label=f"{T-273}°C pmv3")
-    ax1.set_xlabel("P [bar]")
-    ax1.set_ylabel(r"$V_{sol}$ [$m^{3}/g$]")
-    ax1.tick_params(direction="in")
-    ax1.legend().set_visible(True)
+    P_list= linspace(1, _df["P[bar]"].values[-1]*1e5, 50) #[Pa]
+    objects = []
     
-    ax2 = fig.add_subplot(212)
-    ax2.plot(p*1e-5, Vp_pmv1, color=custom_colours[1], linestyle="solid", marker="None", label=f"{T-273}°C pmv1")
-    ax2.plot(p*1e-5, Vp_pmv2, color=custom_colours[2], linestyle="solid", marker="None", label=f"{T-273}°C pmv2")
-    ax2.plot(p*1e-5, Vp_pmv3, color=custom_colours[3], linestyle="solid", marker="None", label=f"{T-273}°C pmv3")
-    ax2.set_xlabel("P [bar]")
-    ax2.set_ylabel(r"$V_{pol}$ [$m^{3}/g$]")
-    ax2.tick_params(direction="in")
-    ax2.legend().set_visible(True)
-    plt.show()
+    # pmv 1
+    Vs_pmv1 = []
+    Vp_pmv1 = []
+    for j, _p in enumerate(P_list):
+        if j == 0:
+            obj = DetailedSolPol(base_obj, T, _p,)
+        else:
+            x0_list = update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
+            obj = DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list,)
+        Vspmv1, Vppmv1 = obj.Vs_Vp_pmv1()
+        
+        objects.append(obj)
+        Vs_pmv1.append(Vspmv1)
+        Vp_pmv1.append(Vppmv1)
+    
+    # pmv 2
+    Vs_pmv2, Vp_pmv2 = zip(*[DetailedSolPol(base_obj, T, _p).Vs_Vp_pmv2() for _p in P_list])
+    
+    # pmv 3
+    Vs_pmv3, Vp_pmv3 = zip(*[DetailedSolPol(base_obj, T, _p).Vs_Vp_pmv3() for _p in P_list])
+    
+    # Vs and Vp 
+    fig = plt.figure()
+    ax1 = fig.add_subplot()
+    ax1.plot(P_list*1e-5, Vs_pmv1, color=custom_colours[1], linestyle="solid", marker="None")
+    ax1.plot(P_list*1e-5, Vs_pmv2, color=custom_colours[2], linestyle="solid", marker="None")
+    ax1.plot(P_list*1e-5, Vs_pmv3, color=custom_colours[3], linestyle="solid", marker="None")
+    ax1.plot(P_list*1e-5, Vp_pmv1, color=custom_colours[1], linestyle="dashed", marker="None")
+    ax1.plot(P_list*1e-5, Vp_pmv2, color=custom_colours[2], linestyle="dashed", marker="None")
+    ax1.plot(P_list*1e-5, Vp_pmv3, color=custom_colours[3], linestyle="dashed", marker="None")
+    ax1.set_xlabel("P [bar]")
+    ax1.set_ylabel(r"$\bar{V}$ [$m^{3}/g$]")
+    ax1.tick_params(direction="in")
+    # Legends
+    legend_colours = [Line2D([0], [0], linestyle="None", marker=".", color=custom_colours[i+1],
+                             label=f"{T-273}°C pmv{pmv}") for i, pmv in enumerate(["1", "2", "3"])]
+    legend_linestyles = [Line2D([0], [0], linestyle=line, marker="None", color="black",
+                             label=f"{label}") for line, label in zip(["solid", "dashed"],["sol","pol"])]
+    legend = legend_colours + legend_linestyles
+    ax1.legend(handles=legend)
+    
+    # Vs plot
+    # fig = plt.figure()
+    # ax2 = fig.add_subplot()
+    # ax2.plot(P_list*1e-5, Vs_pmv1, color=custom_colours[1], linestyle="solid", marker="None", label=f"{T-273}°C pmv1")
+    # ax2.plot(P_list*1e-5, Vs_pmv2, color=custom_colours[2], linestyle="solid", marker="None", label=f"{T-273}°C pmv2")
+    # ax2.plot(P_list*1e-5, Vs_pmv3, color=custom_colours[3], linestyle="solid", marker="None", label=f"{T-273}°C pmv3")
+    # ax2.set_xlabel("P [bar]")
+    # ax2.set_ylabel(r"$V_{sol}$ [$m^{3}/g$]")
+    # ax2.tick_params(direction="in")
+    # ax2.legend().set_visible(True)
+    
+    # # Vp plot
+    # fig = plt.figure()
+    # ax3 = fig.add_subplot()
+    # ax3.plot(P_list*1e-5, Vp_pmv1, color=custom_colours[1], linestyle="solid", marker="None", label=f"{T-273}°C pmv1")
+    # ax3.plot(P_list*1e-5, Vp_pmv2, color=custom_colours[2], linestyle="solid", marker="None", label=f"{T-273}°C pmv2")
+    # ax3.plot(P_list*1e-5, Vp_pmv3, color=custom_colours[3], linestyle="solid", marker="None", label=f"{T-273}°C pmv3")
+    # ax3.set_xlabel("P [bar]")
+    # ax3.set_ylabel(r"$V_{pol}$ [$m^{3}/g$]")
+    # ax3.tick_params(direction="in")
+    # ax3.legend().set_visible(True)
+    
+    if display_fig == True:
+        plt.show()
+    if save_fig == True:
+        save_fig_path = f"{data.path}/PlotVsVp_{time_str}.png"
+        plt.savefig(save_fig_path, dpi=1200)
+        print(f"Plot successfully exported to {save_fig_path}.")
 
 def plot_isotherm_epskl_EOS(base_obj, T_list: list, P_list: list, eps_list: list, export_data:bool=False):
     """Function to plot solubility isotherms for multiple eps_kl values at specified T, P.
@@ -1059,16 +1126,18 @@ def plot_isotherm_epskl_EOSvExp(base_obj, T_list: list, eps_list:list, export_da
 
 if __name__ == "__main__":    
     mix = BaseSolPol("CO2","HDPE")
+    # data = SolPolExpData(mix.sol, mix.pol)
+    # print(data.get_sorption_data(25+273))
     # obj=DetailedSolPol(mix,25+273,1e6)
     # print("S_am = ", obj.S_am)
     # print("x_am = ", obj.x_am)
     # print("omaga_am = ", obj.omega_am)
-
     # mix.pmv_method = "2"
     
-    # plot_isotherm_EOSvExp(mix,[25+273, 35+273, 50+273], export_data=False, display_fig=True, save_fig=False)
+    plot_isotherm_EOSvExp(mix,[25+273, 35+273, 50+273], export_data=False, display_fig=False, save_fig=True)
     # plot_isotherm_pmv(mix, [50+273,], export_data=False)
-    # plot_VsVp_pmv(mix, 50+273)    
+    # for T in [25+273, 35+273, 50+273]:
+    #     plot_VsVp_pmv(mix, T, display_fig=False, save_fig=True)
     
     #* eps_kl_EOS
     # plot_isotherm_epskl_EOS(mix, T_list=[25+273,], P_list=linspace(1, 200e5, 5), 
@@ -1081,30 +1150,29 @@ if __name__ == "__main__":
     #                   export_data=False)
     
     #* fit_epskl    
-    eps25_pmv1, fobj25_pmv1 = fit_epskl(mix, T=25+273, x0=200, epskl_bounds=(200, 300), pmv_method = "1")
-    eps35_pmv1, fobj35_pmv1 = fit_epskl(mix, T=35+273, x0=200, epskl_bounds=(200, 300), pmv_method = "1")
-    eps50_pmv1, fobj50_pmv1 = fit_epskl(mix, T=50+273, x0=200, epskl_bounds=(200, 300), pmv_method = "1")
+    # eps25_pmv1, fobj25_pmv1 = fit_epskl(mix, T=25+273, x0=200, epskl_bounds=(200, 300), pmv_method = "1")
+    # eps35_pmv1, fobj35_pmv1 = fit_epskl(mix, T=35+273, x0=200, epskl_bounds=(200, 300), pmv_method = "1")
+    # eps50_pmv1, fobj50_pmv1 = fit_epskl(mix, T=50+273, x0=200, epskl_bounds=(200, 300), pmv_method = "1")
     
-    eps25_pmv2, fobj25_pmv2 = fit_epskl(mix, T=25+273, x0=200, epskl_bounds=(200, 300), pmv_method = "2")
-    eps35_pmv2, fobj35_pmv2 = fit_epskl(mix, T=35+273, x0=200, epskl_bounds=(200, 300), pmv_method = "2")
-    eps50_pmv2, fobj50_pmv2 = fit_epskl(mix, T=50+273, x0=200, epskl_bounds=(200, 300), pmv_method = "2")
+    # eps25_pmv2, fobj25_pmv2 = fit_epskl(mix, T=25+273, x0=200, epskl_bounds=(200, 300), pmv_method = "2")
+    # eps35_pmv2, fobj35_pmv2 = fit_epskl(mix, T=35+273, x0=200, epskl_bounds=(200, 300), pmv_method = "2")
+    # eps50_pmv2, fobj50_pmv2 = fit_epskl(mix, T=50+273, x0=200, epskl_bounds=(200, 300), pmv_method = "2")
     
-    eps25_pmv3, fobj25_pmv3 = fit_epskl(mix, T=25+273, x0=200, epskl_bounds=(200, 300), pmv_method = "3")
-    eps35_pmv3, fobj35_pmv3 = fit_epskl(mix, T=35+273, x0=200, epskl_bounds=(200, 300), pmv_method = "3")
-    eps50_pmv3, fobj50_pmv3 = fit_epskl(mix, T=50+273, x0=200, epskl_bounds=(200, 300), pmv_method = "3")
-    print("pmv 1")
-    print(f"25°C, eps = {eps25_pmv1}, fobj = {fobj25_pmv1}")
-    print(f"35°C, eps = {eps35_pmv1}, fobj = {fobj35_pmv1}")
-    print(f"50°C, eps = {eps50_pmv1}, fobj = {fobj50_pmv1}")    
-    print("pmv 2")
-    print(f"25°C, eps = {eps25_pmv2}, fobj = {fobj25_pmv2}")
-    print(f"35°C, eps = {eps35_pmv2}, fobj = {fobj35_pmv2}")
-    print(f"50°C, eps = {eps50_pmv2}, fobj = {fobj50_pmv2}")
-    print("pmv 3")
-    print(f"25°C, eps = {eps25_pmv3}, fobj = {fobj25_pmv3}")
-    print(f"35°C, eps = {eps35_pmv3}, fobj = {fobj35_pmv3}")
-    print(f"50°C, eps = {eps50_pmv3}, fobj = {fobj50_pmv3}")
-
+    # eps25_pmv3, fobj25_pmv3 = fit_epskl(mix, T=25+273, x0=200, epskl_bounds=(200, 300), pmv_method = "3")
+    # eps35_pmv3, fobj35_pmv3 = fit_epskl(mix, T=35+273, x0=200, epskl_bounds=(200, 300), pmv_method = "3")
+    # eps50_pmv3, fobj50_pmv3 = fit_epskl(mix, T=50+273, x0=200, epskl_bounds=(200, 300), pmv_method = "3")
+    # print("pmv 1")
+    # print(f"25°C, eps = {eps25_pmv1}, fobj = {fobj25_pmv1}")
+    # print(f"35°C, eps = {eps35_pmv1}, fobj = {fobj35_pmv1}")
+    # print(f"50°C, eps = {eps50_pmv1}, fobj = {fobj50_pmv1}")    
+    # print("pmv 2")
+    # print(f"25°C, eps = {eps25_pmv2}, fobj = {fobj25_pmv2}")
+    # print(f"35°C, eps = {eps35_pmv2}, fobj = {fobj35_pmv2}")
+    # print(f"50°C, eps = {eps50_pmv2}, fobj = {fobj50_pmv2}")
+    # print("pmv 3")
+    # print(f"25°C, eps = {eps25_pmv3}, fobj = {fobj25_pmv3}")
+    # print(f"35°C, eps = {eps35_pmv3}, fobj = {fobj35_pmv3}")
+    # print(f"50°C, eps = {eps50_pmv3}, fobj = {fobj50_pmv3}")
     # mix.modify_kl(259.78)
     # plot_isotherm_EOSvExp(mix, T_list=[25+273], export_data=False, display_fig=False, save_fig=True)
     # mix.modify_kl(244.23)
