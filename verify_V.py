@@ -107,10 +107,11 @@ print("Data successfully exported to: ", export_path)
 fig = plt.figure()
 ax = fig.add_subplot(111)
 for i, T in enumerate(T_list):
-    ax.plot(P_list*1e-5, array(V_fromPmv[T]), color=S.custom_colours[i], linestyle="solid", label = f"{T-273}°C from Vs and Vp")
-    ax.plot(P_list*1e-5, array(V_fromSAFT[T]), color=S.custom_colours[i], linestyle="dashed", label = f"{T-273}°C from SAFT prediction")
-ax.set(xlabel='P [bar]', ylabel=r"$V_{am}$ [$m^{3}$/$g_{pol am}$]",
-       title=r"Comparison of total amorphous volume $V_{am}$")
+    ax.plot(P_list*1e-5, array(V_fromPmv[T])*1e6, color=S.custom_colours[i], linestyle="solid", label = f"{T-273}°C from Vs and Vp")
+    ax.plot(P_list*1e-5, array(V_fromSAFT[T])*1e6, color=S.custom_colours[i], linestyle="dashed", label = f"{T-273}°C from SAFT prediction")
+ax.set(xlabel='P [bar]', ylabel=r"$\hat{V}_{am}$ [$cm^{3}$/$g_{pol \: am}$]",
+       title=r"Comparison of total amorphous volume $V_{am}$"
+       )
 ax.legend().set_visible(True)
 
 #* V am per mol comparison
