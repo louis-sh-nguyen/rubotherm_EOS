@@ -10,6 +10,22 @@ from numpy import *
 from datetime import datetime
 from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
+import matplotlib
+
+# Plotting master configuration
+matplotlib.rcParams["figure.figsize"] = [4.0, 3.5]  # in inches
+matplotlib.rcParams["mathtext.default"] = "regular"  # same as regular text
+matplotlib.rcParams["font.family"] = "DejaVu Sans"  # alternative: "serif"
+matplotlib.rcParams["font.size"] = 10.0
+matplotlib.rcParams["axes.titlesize"] = "small"  # relative to font.size
+matplotlib.rcParams["axes.labelsize"] = "small"  # relative to font.size
+matplotlib.rcParams["xtick.labelsize"] = "x-small"  # relative to font.size
+matplotlib.rcParams["ytick.labelsize"] = "x-small"  # relative to font.size
+matplotlib.rcParams["legend.fontsize"] = "xx-small"  # relative to font.size
+matplotlib.rcParams["legend.frameon"] = False
+matplotlib.rcParams["grid.linestyle"] = "-."
+matplotlib.rcParams["grid.linewidth"] = 0.15  # in point units
+matplotlib.rcParams["figure.autolayout"] = True
 
 def plot_VsVp_pmv(base_obj, T: float, display_fig:bool=True, save_fig:bool=False):
     """Function to plot partial molar volume isotherms at single temperature.
@@ -66,6 +82,7 @@ def plot_VsVp_pmv(base_obj, T: float, display_fig:bool=True, save_fig:bool=False
     ax1.plot(P_list*1e-5, Vp_pmv3*1e6, color=S.custom_colours[3], linestyle="dashed", marker="None")
     ax1.set_xlabel("P [bar]")
     ax1.set_ylabel(r"$\hat{V}$ [$cm^{3}/g$]")
+    ax1.set_ylim(top=1.20, bottom=0.70)
     ax1.tick_params(direction="in")
     # Legends
     legend_colours = [Line2D([0], [0], linestyle="None", marker=".", color=S.custom_colours[i+1],
