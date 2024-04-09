@@ -1,0 +1,88 @@
+"""
+Script to plot Vs and Vp calcualted from each pmv method.
+Louis Nguyen
+sn621@ic.ac.uk
+09 Apr 2024
+"""
+
+import solubility_master as S
+from numpy import *
+from datetime import datetime
+from matplotlib.lines import Line2D
+import matplotlib.pyplot as plt
+
+def plot_VsVp_pmv(base_obj, T: float, display_fig:bool=True, save_fig:bool=False):
+    """Function to plot partial molar volume isotherms at single temperature.
+
+    Args:
+        spm (class object): class object representing the sol-pol mixture.
+        T (float): temperature [K].  
+    """
+    now = datetime.now()  # current time
+    time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM    
+    
+    data = S.SolPolExpData(base_obj.sol, base_obj.pol)    
+    _df=data.get_sorption_data(T)
+    P_list= linspace(1, _df["P[bar]"].values[-1]*1e5, 50) #[Pa]
+    objects = []
+    
+    # pmv 1
+    Vs_pmv1 = []
+    Vp_pmv1 = []
+    for j, _p in enumerate(P_list):
+        if j == 0:
+            obj = S.DetailedSolPol(base_obj, T, _p,)
+        else:
+            x0_list = S.update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
+            obj = S.DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list,)
+        Vspmv1, Vppmv1 = obj.Vs_Vp_pmv1()
+        
+        objects.append(obj)
+        Vs_pmv1.append(Vspmv1)
+        Vp_pmv1.append(Vppmv1)
+    
+    # pmv 2
+    Vs_pmv2, Vp_pmv2 = zip(*[S.DetailedSolPol(base_obj, T, _p).Vs_Vp_pmv2() for _p in P_list])
+    
+    # pmv 3
+    Vs_pmv3, Vp_pmv3 = zip(*[S.DetailedSolPol(base_obj, T, _p).Vs_Vp_pmv3() for _p in P_list])
+    
+    # Converting to np array for calculations
+    Vs_pmv1 = array(Vs_pmv1)
+    Vp_pmv1 = array(Vp_pmv1)
+    Vs_pmv2 = array(Vs_pmv2)
+    Vp_pmv2 = array(Vp_pmv2)
+    Vs_pmv3 = array(Vs_pmv3)
+    Vp_pmv3 = array(Vp_pmv3)    
+    
+    # Vs and Vp 
+    fig = plt.figure()
+    ax1 = fig.add_subplot()
+    ax1.plot(P_list*1e-5, Vs_pmv1*1e6, color=S.custom_colours[1], linestyle="solid", marker="None")
+    ax1.plot(P_list*1e-5, Vs_pmv2*1e6, color=S.custom_colours[2], linestyle="solid", marker="None")
+    ax1.plot(P_list*1e-5, Vs_pmv3*1e6, color=S.custom_colours[3], linestyle="solid", marker="None")
+    ax1.plot(P_list*1e-5, Vp_pmv1*1e6, color=S.custom_colours[1], linestyle="dashed", marker="None")
+    ax1.plot(P_list*1e-5, Vp_pmv2*1e6, color=S.custom_colours[2], linestyle="dashed", marker="None")
+    ax1.plot(P_list*1e-5, Vp_pmv3*1e6, color=S.custom_colours[3], linestyle="dashed", marker="None")
+    ax1.set_xlabel("P [bar]")
+    ax1.set_ylabel(r"$\hat{V}$ [$cm^{3}/g$]")
+    ax1.tick_params(direction="in")
+    # Legends
+    legend_colours = [Line2D([0], [0], linestyle="None", marker=".", color=S.custom_colours[i+1],
+                             label=f"{T-273}°C pmv{pmv}") for i, pmv in enumerate(["1", "2", "3"])]
+    legend_linestyles = [Line2D([0], [0], linestyle=line, marker="None", color="black",
+                             label=f"{label}") for line, label in zip(["solid", "dashed"],["sol","pol"])]
+    legend = legend_colours + legend_linestyles
+    ax1.legend(handles=legend)
+    
+    if display_fig == True:
+        plt.show()
+    if save_fig == True:
+        save_fig_path = f"{data.path}/PlotVsVp_{time_str}.png"
+        plt.savefig(save_fig_path, dpi=1200)
+        print(f"Plot successfully exported to {save_fig_path}.")
+
+if __name__ == "__main__":
+    mix = S.BaseSolPol("CO2","HDPE")
+    for T in array([25, 35, 50]) + 273:
+        plot_VsVp_pmv(mix, T, display_fig=False, save_fig=True)
