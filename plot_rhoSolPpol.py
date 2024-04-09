@@ -44,10 +44,10 @@ def plot_rho_sol(base_obj, T_list:list[float], display_fig:bool=True, save_fig:b
 
     for i, T in enumerate(T_list):
         #* Using fixed range
-        P_list[T] = linspace(1, pbar_max*1e5, 100)  # [Pa]    
+        # P_list[T] = linspace(1, pbar_max*1e5, 100)  # [Pa]    
         
         #* Using matching pressure range with exp data
-        # P_list[T] = linspace(1, df[T]["P[bar]"].max()*1e5, 100)  # [Pa]
+        P_list[T] = linspace(1, df[T]["P[bar]"].max()*1e5, 100)  # [Pa]
         
         # SAFT prediciton
         _rhoCO2_SAFT = [S.DetailedSolPol(base_obj, T, P).SinglePhaseDensity(array([1., 0.]),T,P) for P in P_list[T]] # [mol/m3]
@@ -97,10 +97,10 @@ def plot_rho_pol(base_obj, T_list:list[float], display_fig:bool=True, save_fig:b
 
     for i, T in enumerate(T_list):
         #* Using fixed range
-        P_list[T] = linspace(1, pbar_max*1e5, 100)  # [Pa]
+        # P_list[T] = linspace(1, pbar_max*1e5, 100)  # [Pa]
         
         #* Using matching pressure range with exp data
-        # P_list[T] = linspace(1, df[T]["P[bar]"].max()*1e5, 100)  # [Pa]
+        P_list[T] = linspace(1, df[T]["P[bar]"].max()*1e5, 100)  # [Pa]
         
         # SAFT prediciton
         _rhoPol_SAFT = [S.DetailedSolPol(base_obj, T, P).SinglePhaseDensity(array([0., 1.]),T,P) for P in P_list[T]] # [mol/m3]
@@ -112,10 +112,6 @@ def plot_rho_pol(base_obj, T_list:list[float], display_fig:bool=True, save_fig:b
     ax = fig.add_subplot(111)
     for i, T in enumerate(T_list):
         
-        # Exp measurement
-        ax.plot(df[T]["P[bar]"], df[T]["ρ[g/cc]"], \
-            color=S.custom_colours[i], linestyle="None", marker=S.custom_markers[-1], label=f"{T-273}°C - exp")
-        
         # SAFT predictions
         ax.plot(P_list[T]*1e-5, rhoPol_SAFT[T], \
             color=S.custom_colours[i], linestyle="solid", marker="None", label=f"{T-273}°C - SAFT")
@@ -126,7 +122,7 @@ def plot_rho_pol(base_obj, T_list:list[float], display_fig:bool=True, save_fig:b
     ax.tick_params(direction="in")
     ax.legend().set_visible(True)
     if save_fig == True:
-        save_fig_path = f"{data.path}/PlotRhoCO2_{time_str}.png"
+        save_fig_path = f"{data.path}/PlotRhoPol_{time_str}.png"
         plt.savefig(save_fig_path, dpi=1200)
         print(f"Plot successfully exported to {save_fig_path}.")
     if display_fig == True:

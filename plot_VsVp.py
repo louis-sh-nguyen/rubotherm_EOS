@@ -82,7 +82,7 @@ def plot_VsVp_pmv(base_obj, T: float, display_fig:bool=True, save_fig:bool=False
     ax1.plot(P_list*1e-5, Vp_pmv3*1e6, color=S.custom_colours[3], linestyle="dashed", marker="None")
     ax1.set_xlabel("P [bar]")
     ax1.set_ylabel(r"$\hat{V}$ [$cm^{3}/g$]")
-    ax1.set_ylim(top=1.20, bottom=0.70)
+    ax1.set_ylim(top=1.25, bottom=0.85)
     ax1.tick_params(direction="in")
     # Legends
     legend_colours = [Line2D([0], [0], linestyle="None", marker=".", color=S.custom_colours[i+1],
