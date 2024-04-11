@@ -126,8 +126,8 @@ def plot_isotherm_epskl_EOSvExp(base_obj, T: float, eps_list:list, export_data:b
             color=S.custom_colours[j], linestyle="None", marker=S.custom_markers[1], label=f"{T-273}°C eps={eps} - corrected exp")
     
     ax.set_xlabel("P [bar]")
-    ax.set_ylabel("S [g/g]")
-    # ax.set_yscale('log')
+    ax.set_ylabel(r"$S_{sc}$ [$g_{sol}$/$g_{pol \: sc}$]")
+    ax.set_ylim(top=1.70)
     ax.tick_params(direction="in")
     
     # Legends setting
@@ -143,8 +143,8 @@ def plot_isotherm_epskl_EOSvExp(base_obj, T: float, eps_list:list, export_data:b
     if display_fig == True:
         plt.show()
     if save_fig == True:
-        save_fig_path = f"{data.path}/IsothermEpsEOSvExp_{time_str}.png"
-        plt.savefig(save_fig_path, dpi=1200, transparent=True)
+        save_fig_path = f"{data.path}/Anals/IsothermEpsEOSvExp_{time_str}.png"
+        plt.savefig(save_fig_path, dpi=1200)
         print(f"Plot successfully exported to {save_fig_path}.")
 
 if __name__ == "__main__":
