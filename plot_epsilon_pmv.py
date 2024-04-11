@@ -140,28 +140,32 @@ def plot_eps_pmv(T: float, export_data:bool=False, display_fig:bool=True, save_f
     # Plot data
     fig = plt.figure()
     ax = fig.add_subplot(111)  # SAFT only
-    # Not corrected exp
+    
+    # Uncorrected exp
     mask = (df['T [K]'] == T) & (df['pmv_method'] == "1")
-    ax.plot(df[mask]['P [Pa]']*1e-5, df[mask]['S_sc_exp_NotCorrected [g/g]'], 
-            color=S.custom_colours[0], linestyle="None", marker=S.custom_markers[0], label=f"{T-273}°C, exp - uncorrected")
+    # ax.plot(df[mask]['P [Pa]']*1e-5, df[mask]['S_sc_exp_NotCorrected [g/g]'], 
+    #         color=S.custom_colours[0], linestyle="None", marker=S.custom_markers[0], label=f"{T-273}°C, exp - uncorrected")
     for k, pmv in enumerate(pmv_list):    
         mask = (df['T [K]'] == T) & (df['pmv_method'] == pmv)
+        
         # Corrected exp
         ax.plot(df[mask]['P [Pa]']*1e-5, df[mask]['S_sc_exp_corrected [g/g]'], 
                 color=S.custom_colours[k+1], linestyle="None", marker=S.custom_markers[1], label=f"{T-273}°C, pmv{pmv} exp - corrected")
+        
         # SAFT predictions
         ax.plot(P_SAFT*1e-5, S_SAFT[pmv], 
                 color=S.custom_colours[k+1], linestyle="solid", marker="None", label=f"{T-273}°C, pmv{pmv} SAFT")
         
 
     ax.set_xlabel("P [bar]")
-    ax.set_ylabel("S_sc [g/g]")
+    ax.set_ylabel(r"$S_{sc}$ [$g_{sol}$/$g_{pol \: sc}$]")
+    ax.set_ylim(top=0.025)
     ax.tick_params(direction="in")
     ax.legend().set_visible(True)
     if display_fig == True:
         plt.show()
     if save_fig == True:
-        save_fig_path = f"{data.path}/IsothermEpsEOSvExp_{time_str}.png"
+        save_fig_path = f"{data.path}/Anals/IsothermEpsEOSvExp_{time_str}.png"
         plt.savefig(save_fig_path, dpi=1200,)
         print(f"Plot successfully exported to {save_fig_path}.")
         

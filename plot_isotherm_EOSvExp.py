@@ -118,11 +118,16 @@ def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False
     fig = plt.figure()
     ax = fig.add_subplot(111)
     for i, T in enumerate(T_list):
+        # Uncorrected
         # ax.plot(df[T]["P[bar]"],df[T]['S_exp_woSW[g/g]'],color=S.custom_colours[i], linestyle="None", marker="o",label=f"{T-273}°C exp - uncorrected")
-        # ax.plot(df[T]["P[bar]"],df[T]['S_exp_SW[g/g]'],color=S.custom_colours[i], linestyle="None", marker="x",label=f"{T-273}°C exp - corrected")
+        
+        # Corrected
+        ax.plot(df[T]["P[bar]"],df[T]['S_exp_SW[g/g]'],color=S.custom_colours[i], linestyle="None", marker="x",label=f"{T-273}°C exp - corrected")
+        
+        # EoS Prediction
         ax.plot(P_SAFT[T]*1e-5,S_SAFT[T],color=S.custom_colours[i], linestyle="solid",marker="None",label=f"{T-273}°C SAFT")
     ax.set_xlabel("P [bar]")
-    ax.set_ylabel("S [g/g]")
+    ax.set_ylabel(r"$S_{sc}$ [$g_{sol}$/$g_{pol \: sc}$]")
     ax.tick_params(direction="in")
     ax.legend().set_visible(True)
     if display_fig == True:
@@ -134,4 +139,11 @@ def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False
 
 if __name__ == "__main__":
     mix = S.BaseSolPol("CO2","HDPE")
-    plot_isotherm_EOSvExp(mix,[25+273, 35+273, 50+273], export_data=False, display_fig=False, save_fig=True)
+    # plot_isotherm_EOSvExp(mix,[25+273, 35+273, 50+273], export_data=False, display_fig=False, save_fig=True)
+
+    mix.modify_kl(259.78)
+    plot_isotherm_EOSvExp(mix, T_list=[25+273], export_data=False, display_fig=False, save_fig=True)
+    mix.modify_kl(244.23)
+    plot_isotherm_EOSvExp(mix, T_list=[35+273], export_data=False, display_fig=False, save_fig=True)
+    mix.modify_kl(251.05)
+    plot_isotherm_EOSvExp(mix, T_list=[50+273], export_data=False, display_fig=False, save_fig=True)
