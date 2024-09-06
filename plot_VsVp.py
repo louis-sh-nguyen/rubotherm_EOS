@@ -99,7 +99,92 @@ def plot_VsVp_pmv(base_obj, T: float, display_fig:bool=True, save_fig:bool=False
         plt.savefig(save_fig_path, dpi=1200)
         print(f"Plot successfully exported to {save_fig_path}.")
 
+def plot_VsVp_vs_pressure(base_obj, T):
+    Vs_values = []
+    Vp_values = []
+    p_values = linspace(1, 20e6, 10)    # [Pa]
+    for p in linspace(1, 20e6, 10):
+        obj = S.DetailedSolPol(base_obj, T, p)
+        Vs, Vp = obj.Vs_Vp_pmv2()
+        Vs_values.append(Vs)
+        Vp_values.append(Vp)
+    
+    plt.figure()
+    plt.subplot(2, 1, 1)
+    plt.plot(p_values*1e-6, Vs_values, linestyle='None', marker='x')
+    plt.xlabel('Pressure [MPa]')
+    plt.ylabel(r'Vs [$m^{3}$/g]')
+    
+    plt.subplot(2, 1, 2)
+    plt.plot(p_values*1e-6, Vp_values, linestyle='None', marker='x')
+    plt.xlabel('Pressure [MPa]')
+    plt.ylabel(r'Vp [$m^{3}$/g]')
+    plt.show()
+
+def plot_VsVp_vs_Sam_multiT(base_obj, T_list, p):
+    S_values = linspace(0., 0.1, 20)    # [g/g]
+    Vs_values = {}
+    Vp_values = {}
+    for T in T_list:
+        Vs_values[T] = []
+        Vp_values[T] = []
+        for solubility in S_values:
+            obj = S.DetailedSolPol(base_obj, T, p)
+            Vs, Vp = obj.Vs_Vp_pmv1(obj.T, obj.P, solubility)
+            Vs_values[T].append(Vs)
+            Vp_values[T].append(Vp)
+    
+    plt.figure()
+    plt.subplot(2, 1, 1)
+    for T in T_list:
+        plt.plot(S_values, Vs_values[T], linestyle='None', marker='x', label=f'{T-273} °C')
+    plt.xlabel(r'$S_{am}$ [g/g]')
+    plt.ylabel(r'$V_{s}$ [$m^{3}$/g]')
+    
+    plt.subplot(2, 1, 2)
+    for T in T_list:
+        plt.plot(S_values, Vp_values[T], linestyle='None', marker='x', label=f'{T-273} °C')
+    plt.xlabel(r'$S_{am}$ [g/g]')
+    plt.ylabel(r'$V_{p}$ [$m^{3}$/g]')
+    
+    plt.legend()
+    plt.show()
+
+def plot_VsVp_vs_Sam_multiP(base_obj, T, p_list):
+    p_values = p_list   # [Pa]
+    S_values = linspace(0., 0.1, 10)    # [g/g]
+    Vs_values = {}
+    Vp_values = {}
+    for p in p_values:
+        Vs_values[p] = []
+        Vp_values[p] = []
+        for solubility in S_values:
+            obj = S.DetailedSolPol(base_obj, T, p)
+            Vs, Vp = obj.Vs_Vp_pmv1(obj.T, obj.P, solubility)
+            Vs_values[p].append(Vs)
+            Vp_values[p].append(Vp)
+    
+    plt.figure()
+    plt.subplot(2, 1, 1)
+    for p in p_values:
+        plt.plot(S_values, Vs_values[p], linestyle='None', marker='x', label=f'{p*1e-6} MPa')
+    plt.xlabel(r'$S_{am}$ [g/g]')
+    plt.ylabel(r'$V_{s}$ [$m^{3}$/g]')
+    
+    plt.subplot(2, 1, 2)
+    for p in p_values:
+        plt.plot(S_values, Vp_values[p], linestyle='None', marker='x', label=f'{p*1e-6} MPa')
+    plt.xlabel(r'$S_{am}$ [g/g]')
+    plt.ylabel(r'$V_{p}$ [$m^{3}$/g]')
+    
+    plt.legend()
+    plt.show()
+
+
 if __name__ == "__main__":
     mix = S.BaseSolPol("CO2","HDPE")
     for T in array([25, 35, 50]) + 273:
         plot_VsVp_pmv(mix, T, display_fig=False, save_fig=True)
+
+    #* Test Vs and Vp vs. S_am at different pressures
+    # plot_VsVp_vs_Sam_multiP(mix, T=35+273, p_list=linspace(1e6, 15e6, 10))
