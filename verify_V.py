@@ -58,17 +58,17 @@ for i, T in enumerate(T_list):
         V_s, V_p = obj.Vs_Vp_pmv1()     # [m3/g]
         
         # Vmix from constituents V_sol and V_pol
-        term1 = obj.x_am[0]*V_s*obj.MW_sol
-        term2 = obj.x_am[1]*V_p*obj.MW_pol
+        term1 = obj.x_am_EOS[0]*V_s*obj.MW_sol
+        term2 = obj.x_am_EOS[1]*V_p*obj.MW_pol
         V1_molar =  (term1 + term2)   # [m3/mol]
-        V1 =  (term1 + term2) /(obj.x_am[1] * obj.MW_pol)   # [m3/g_pol_am]
+        V1 =  (term1 + term2) /(obj.x_am_EOS[1] * obj.MW_pol)   # [m3/g_pol_am]
         
         # Vmix from SAFT calculation
-        V2_molar = 1/obj.SinglePhaseDensity(obj.x_am,obj.T,obj.P)    # [m3/g_pol_am]
-        V2 = 1/obj.SinglePhaseDensity(obj.x_am,obj.T,obj.P) / (obj.x_am[1] * obj.MW_pol)   # [m3/g_pol_am]
+        V2_molar = 1/obj.SinglePhaseDensity(obj.x_am_EOS,obj.T,obj.P)    # [m3/g_pol_am]
+        V2 = 1/obj.SinglePhaseDensity(obj.x_am_EOS,obj.T,obj.P) / (obj.x_am_EOS[1] * obj.MW_pol)   # [m3/g_pol_am]
         
-        x_sol[T].append(obj.x_am[0])
-        x_pol[T].append(obj.x_am[1])
+        x_sol[T].append(obj.x_am_EOS[0])
+        x_pol[T].append(obj.x_am_EOS[1])
         V_sol[T].append(V_s)
         V_pol[T].append(V_p)
         V_fromPmv[T].append(V1)
@@ -107,10 +107,10 @@ print("Data successfully exported to: ", export_path)
 fig = plt.figure()
 ax = fig.add_subplot(111)
 for i, T in enumerate(T_list):
-    ax.plot(P_list*1e-5, array(V_fromPmv[T])*1e6, color=S.custom_colours[i], linestyle="solid", label = f"{T-273}°C from Vs and Vp")
+    # ax.plot(P_list*1e-5, array(V_fromPmv[T])*1e6, color=S.custom_colours[i], linestyle="solid", label = f"{T-273}°C from Vs and Vp")
     ax.plot(P_list*1e-5, array(V_fromSAFT[T])*1e6, color=S.custom_colours[i], linestyle="dashed", label = f"{T-273}°C from SAFT prediction")
 ax.set(xlabel='P [bar]', ylabel=r"$\hat{V}_{am}$ [$cm^{3}$/$g_{pol \: am}$]",
-       title=r"Comparison of total amorphous volume $V_{am}$"
+    #    title=r"Comparison of total amorphous volume $V_{am}$"
        )
 ax.legend().set_visible(True)
 

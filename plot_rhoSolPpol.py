@@ -26,6 +26,9 @@ matplotlib.rcParams["grid.linestyle"] = "-."
 matplotlib.rcParams["grid.linewidth"] = 0.15  # in point units
 matplotlib.rcParams["figure.autolayout"] = True
 
+custom_colours = ['green','blue','red','purple','orange','brown','plum','indigo','olive','grey']
+custom_markers = ['x', 'o', 's', '^', '*', 'D', '.']
+
 def plot_rho_sol(base_obj, T_list:list[float], display_fig:bool=True, save_fig:bool=False):
     now = datetime.now()  # current time
     time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM            
@@ -41,18 +44,42 @@ def plot_rho_sol(base_obj, T_list:list[float], display_fig:bool=True, save_fig:b
             pbar_max = max_i
         else:
             pbar_max = max(pbar_max, max_i)
-
+    
+    def get_rhoCO2_SAFT(T, P):
+        eos = base_obj.eos_sol
+        rhoL = eos.density(T, P, "L")   # [mol/m^3]
+        rhoV = eos.density(T, P, "V")   # [mol/m^3]
+        if isclose(rhoL, rhoV):
+            rho = rhoV
+            print("SC phase")
+            
+        elif isclose(P, eos.pressure(rhoV,T), rtol=1e-5):
+            rho = rhoV
+            print("V phase")
+            
+        elif isclose(P, eos.pressure(rhoL,T), rtol=1e-5):
+            rho = rhoL
+            print("L phase")
+        
+        return rho * base_obj.MW_sol  * 1e-6  # [g/cm3]
+    
     for i, T in enumerate(T_list):
         #* Using fixed range
         # P_list[T] = linspace(1, pbar_max*1e5, 100)  # [Pa]    
         
         #* Using matching pressure range with exp data
-        P_list[T] = linspace(1, df[T]["P[bar]"].max()*1e5, 100)  # [Pa]
+        # P_list[T] = linspace(1, df[T]["P[bar]"].max()*1e5, 10)  # [Pa]
+        
+        #* Using experimental pressure values
+        P_list[T] = df[T]["P[bar]"]*1e5  # [Pa]
         
         # SAFT prediciton
-        _rhoCO2_SAFT = [S.DetailedSolPol(base_obj, T, P).SinglePhaseDensity(array([1., 0.]),T,P) for P in P_list[T]] # [mol/m3]
-        rhoCO2_SAFT[T] = array(_rhoCO2_SAFT) * base_obj.MW_sol  * 1e-6  # [g/cm3]
+        rhoCO2_SAFT[T] = [get_rhoCO2_SAFT(T,P) for P in P_list[T]] # [g/cm3]
 
+        print(f"Temperature: {T-273} °C")
+        print(F'P_list [Pa] = {P_list[T]}')
+        print(f"rhoCO2_SAFT [g/cm3] = {rhoCO2_SAFT[T]}")
+        print('')
 
     # Plot figure
     fig = plt.figure()
@@ -128,8 +155,49 @@ def plot_rho_pol(base_obj, T_list:list[float], display_fig:bool=True, save_fig:b
     if display_fig == True:
         plt.show()
 
-
+def plot_rhoCO2_comparison(base_obj, T_list:list[float], display_fig:bool=True, save_fig:bool=False):
+    data = S.SolPolExpData(base_obj.sol, base_obj.pol)
+    df = {}
+    for i, T in enumerate(T_list):    
+        df[T]=data.get_sorption_data(T)
+        # print(df[T].info())   
+    
+    rho_types = ['exp', 'SW EoS', 'SAFT-γ Mie EoS']
+    # Plot figure
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    for i, T in enumerate(T_list):
+        ax.plot(df[T]["P[bar]"], df[T]["ρ[g/cc]"], color=custom_colours[i], marker=custom_markers[0], markerfacecolor='None', linestyle='None', label=rho_types[0])
+        ax.plot(df[T]["P[bar]"], df[T]["ρSW[g/cc]"], color=custom_colours[i], marker=custom_markers[1], markerfacecolor='None', linestyle='None', label=rho_types[1])
+        ax.plot(df[T]["P[bar]"], df[T]["ρSAFT[g/cc]"], color=custom_colours[i], marker=custom_markers[2], markerfacecolor='None', linestyle='None', label=rho_types[2])
+    
+    ax.set_xlabel('P [bar]')
+    ax.set_ylabel(r'$\rho_{CO2}$ [g/$cm^{3}$]')
+    ax.tick_params(direction="in")
+    
+    # Create custom legend for marker colours and shapes
+    colour_legend = [matplotlib.lines.Line2D([], [], color=custom_colours[i], marker='None', linestyle='solid', linewidth=3, label=f'{T-273}°C') for i, T in enumerate(T_list)]
+    marker_legend = [matplotlib.lines.Line2D([], [], color='black', marker=custom_markers[i], markerfacecolor='None', linestyle='None', label=f'{type}') for i, type in enumerate(rho_types)]
+    custom_legend = colour_legend + marker_legend
+    
+    # Add custom legend to the plot
+    ax.legend(handles=custom_legend, loc='upper left').set_visible(True)
+    
+    # Update ticks 
+    S.update_subplot_ticks(ax, x_lo=0, y_lo=0)
+    
+    if save_fig == True:
+        save_fig_path = f"{data.path}/rhoCO2_comparison.png"
+        plt.savefig(save_fig_path, dpi=1200)
+        print(f"Plot successfully exported to {save_fig_path}.")
+        
+    if display_fig == True:
+        plt.show()
+        
+    
 if __name__ == "__main__":
     mix = S.BaseSolPol("CO2","HDPE")
-    plot_rho_sol(mix, [25+273, 35+273, 50+273], display_fig=False, save_fig=True)
-    plot_rho_pol(mix, [25+273, 35+273, 50+273], display_fig=False, save_fig=True)
+    # plot_rho_sol(mix, [25+273, 35+273, 50+273], display_fig=True, save_fig=None)
+    # plot_rho_pol(mix, [25+273, 35+273, 50+273], display_fig=False, save_fig=True)
+    # plot_rhoCO2_comparison(mix, [25+273, 35+273, 50+273], display_fig=False, save_fig=True)
+    plot_rhoCO2_comparison(mix, [35+273, 50+273], display_fig=True, save_fig=False)

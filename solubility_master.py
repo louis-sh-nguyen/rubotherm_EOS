@@ -8,8 +8,8 @@ sn621@ic.ac.uk
 import warnings
 from numba.core.errors import NumbaDeprecationWarning, NumbaPendingDeprecationWarning
 
-warnings.simplefilter("ignore", category=NumbaDeprecationWarning)
-warnings.simplefilter("ignore", category=NumbaPendingDeprecationWarning)
+# warnings.simplefilter("ignore", category=NumbaDeprecationWarning)
+# warnings.simplefilter("ignore", category=NumbaPendingDeprecationWarning)
 warnings.filterwarnings("ignore")
 
 from sgtpy_NETGP import component, mixture, saftgammamie, database
@@ -22,13 +22,13 @@ from datetime import datetime
 import addcopyfighandler
 import matplotlib
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 from matplotlib.lines import Line2D
 from colour import Color
 from numpy import *
 import pandas as pd
-from scipy.optimize import fsolve, minimize_scalar
-
+from scipy.optimize import fsolve, minimize_scalar, root, minimize
+from scipy import integrate
+from sympy import symbols, Eq, solve, nsolve
 
 
 # Plotting master configuration
@@ -49,12 +49,52 @@ matplotlib.rcParams["figure.autolayout"] = True
 custom_colours = ["black","green","blue","red","purple","orange","brown","plum","indigo","olive","grey"]
 custom_markers = ["o", "x", "^", "*", "s", "D", "."]
 
-def update_x0_sol_list(previous_x0_sol:float, no_step:int=30, x0_sol_default_range=(1e-6, 0.99999999)):
+def update_x0_sol_list(previous_x0_sol:float, no_step:int=50, x0_sol_default_range=(1e-6, 0.99999999)):
     if (previous_x0_sol is None) or (previous_x0_sol < 0.) or (previous_x0_sol > 1.):
         new_x0_list =  linspace(x0_sol_default_range[0], x0_sol_default_range[1], no_step).tolist()
     else:
         new_x0_list = linspace(previous_x0_sol, x0_sol_default_range[1], no_step).tolist()
     return new_x0_list
+
+# Change subplot styling
+def update_subplot_ticks(ax, x_lo=None, y_lo=None, x_up=None, y_up=None):
+    """Update x and y ticks of subplot ax to cover all data. Put ticks to inside.
+
+    Args:
+        ax: plot object.
+    """
+    # Adjust lower x and y ticks to start from 0
+    if x_lo != None:
+        ax.set_xlim(left=x_lo)
+    if y_lo != None:
+        ax.set_ylim(bottom=y_lo)
+    if x_up != None:
+        ax.set_xlim(right=x_up)
+    if y_up != None:
+        ax.set_ylim(top=y_up)
+    
+    # Get the largest and smallest x ticks and y ticks
+    max_y_tick = max(ax.get_yticks())
+    max_x_tick = max(ax.get_xticks())
+    min_y_tick = min(ax.get_yticks())
+    min_x_tick = min(ax.get_xticks())
+    
+    # Get the length of major ticks on the x-axis
+    ax_x_major_tick_length = ax.get_xticks()[1] - ax.get_xticks()[0]
+    ax_y_major_tick_length = ax.get_yticks()[1] - ax.get_yticks()[0]
+    
+    # Adjust upper x and y ticks to cover all data
+    if x_up == None:        
+        ax.set_xlim(right=max_x_tick + ax_x_major_tick_length)
+    if y_up == None:
+        ax.set_ylim(top=max_y_tick + ax_y_major_tick_length)
+    if x_lo == None:
+        ax.set_xlim(left=min_x_tick - ax_x_major_tick_length)
+    if y_lo == None:
+        ax.set_ylim(bottom=min_y_tick - ax_y_major_tick_length)
+    
+    # Put ticks to inside
+    ax.tick_params(direction="in")
 
 class BaseSolPol:
     """Class to store information about the sol-pol mixture
@@ -153,10 +193,15 @@ class DetailedSolPol(BaseSolPol):
         self.options = kwargs
         #*Expected keys: x0_sol: float, x0_sol_range: list, auto_iterate_x0: bool
         
-        self._S_am = None
-        self._S_sc = None
-        self._x_am = None
-        self._omega_am = None
+        self._S_am_EOS = None
+        self._S_sc_EOS = None
+        self._x_am_EOS = None
+        self._omega_am_EOS = None
+        self._S_sc_exp_uncorr = None
+        self._S_sc_exp = None
+        self._S_am_exp = None
+        self._x_am_exp = None
+        self._omega_am_exp = None
         self._rho_pol = None
         self._omega_cr = None
         self._muad_sol_ext = None
@@ -165,27 +210,59 @@ class DetailedSolPol(BaseSolPol):
         self._rho_mix = None
         self._rho_mix_0 = None
         self._SwellingRatio = None
-        
+                
     @property
-    def S_am(self):
-        if self._S_am is None:
-            self._S_am = self.get_S_am(self.T, self.P)
-        return self._S_am
+    def S_sc_exp(self):
+        if self._S_sc_exp is None or not self.check_condition():
+            self._S_sc_exp = self.get_S_sc_exp()
+        return self._S_sc_exp
     @property
-    def S_sc(self):
-        if self._S_sc is None:
-            self._S_sc = self.get_S_sc()
-        return self._S_sc
+    def SwellingRatio(self):
+        if self._SwellingRatio is None or not self.check_condition():
+            self._SwellingRatio = self.get_SwellingRatio()
+        return self._SwellingRatio
+    
+    
     @property
-    def x_am(self):
-        if self._x_am is None:
-            self._x_am = self.get_x_am()
-        return self._x_am
+    def S_am_EOS(self):
+        if self._S_am_EOS is None:
+            self._S_am_EOS = self.get_S_am_EOS(self.T, self.P)
+        return self._S_am_EOS
     @property
-    def omega_am(self):
-        if self._omega_am is None:
-            self._omega_am = self.get_omega_am()
-        return self._omega_am
+    def S_sc_EOS(self):
+        if self._S_sc_EOS is None:
+            self._S_sc_EOS = self.get_S_sc_EOS()
+        return self._S_sc_EOS
+    @property
+    def x_am_EOS(self):
+        if self._x_am_EOS is None:
+            self._x_am_EOS = self.get_x_am_EOS()
+        return self._x_am_EOS
+    @property
+    def omega_am_EOS(self):
+        if self._omega_am_EOS is None:
+            self._omega_am_EOS = self.get_omega_am_EOS()
+        return self._omega_am_EOS
+    @property
+    def S_am_exp(self):
+        if self._S_am_exp is None:
+            self._S_am_exp = self.get_S_am_exp()
+        return self._S_am_exp
+    @property
+    def x_am_exp(self):
+        if self._x_am_exp is None:
+            self._x_am_exp = self.get_x_am_exp()
+        return self._x_am_exp
+    @property
+    def omega_am_exp(self):
+        if self._omega_am_exp is None:
+            self._omega_am_exp = self.get_omega_am_exp()
+        return self._omega_am_exp
+    @property
+    def S_sc_exp_uncorr(self):
+        if self._S_sc_exp is None:
+            self._S_sc_exp = self.get_S_sc_exp_uncorr()
+        return self._S_sc_exp_uncorr
     @property
     def rho_am(self):
         if self._rho_am is None:
@@ -216,14 +293,1184 @@ class DetailedSolPol(BaseSolPol):
         if self._rho_mix_0 is None:
             self._rho_mix_0 = self.get_rho_mix_0()
         return self._rho_mix_0
-    @property
-    def SwellingRatio(self):
-        if self._SwellingRatio is None:
-            self._SwellingRatio = self.get_SwellingRatio()
-        return self._SwellingRatio
+
+    ### Auxillary fucntions to check solubiltiy and swelling consitency
+    def check_conditions(self):
+        
+        ### Check solubility and SwR consistency
+        return True
     
+    def _solve_parameters_minimize(self): # numerical solving
+        # Import data object
+        data = SolPolExpData(self.sol, self.pol)
+        
+        # Import sorption data at specified T
+        _df = data.get_sorption_data(self.T)
+        
+        # Raise error if data, _df, is not found
+        if _df is None:
+            raise Exception(f"Data not found at T = {self.T} K.")            
+        
+        # Calculate corrected swelling using SAFT and exp data
+        mask = abs(_df["P[bar]"]*1e5 - self.P) <= (self.P*0.01)
+        
+        try:
+            m_net_exp = _df[mask]["MP1*[g]"].values[0] - data.m_met_filled
+            rho_f_exp = _df[mask]["ρ[g/cc]"].values[0]
+            V_b_exp = data.Vbasket
+            V_t0_exp = data.Vs
+            m_ptot_exp = data.ms
+            
+        except Exception as e:
+            print("Error: ")
+            print(e)
+            return None
+        
+        # Get omega_cr
+        omega_cr = self.omega_cr
+        
+        # Get rho_pol_cr
+        rho_p_c = self.rho_pol_cr  # [g/m^3]
+        
+        def equations(vars):
+            S_sc_exp, SwellingRatio = vars
+            
+            # Calculate S_am_exp
+            S_am_exp = S_sc_exp / (1-self.omega_cr)  # [g/g]
+            
+            # Calculate pmv V_s and V_p
+            Vs, Vp = self.Vs_Vp_pmv1(self.T, self.P, S_am_exp)   # [m3/g]
+            
+            # Define auxiliary variables
+            rho_p_am = 1/(S_am_exp*Vs + Vp)  # [g/m^3]
+            rho_p_tol = 1/((1-omega_cr)/rho_p_am + omega_cr/rho_p_c)  # [g/m^3]
+            rho_tot = (1 + S_sc_exp) * rho_p_tol  # [g/m^3]
+        
+            # Define the equations in terms of these variables and instance variables
+            eq1 = -S_sc_exp + (m_net_exp + rho_f_exp * (V_b_exp + V_t0_exp * (1 + SwellingRatio))) / m_ptot_exp
+            eq2 = -SwellingRatio + (rho_p_tol / rho_tot) * (1 + S_sc_exp) - 1
+            
+            return [eq1, eq2]
+        
+        # Objective function (sum of squares of equations)
+        def objective(vars):
+            eqs = equations(vars)
+            return sum(eq**2 for eq in eqs)
+        
+        # Initial guess        
+        # initial_guesses = [[0.01, 0.], [0.01, 0.01], [0.01, 0.02], [0.01, 0.03],] # [S_sc_exp_guess, SwellingRatio_guess]
+        initial_guesses = [[S_sc_exp, SwellingRatio] for S_sc_exp in arange(0, 0.11, 0.01) for SwellingRatio in arange(0, 0.11, 0.01)]
+        
+        print("Initial guesses:", *initial_guesses)
+        
+        solutions = []
+        objective_values = []
+        
+        # Bounds
+        # bounds = [(0, None), (0, None)] # Non-negative values
+        bounds = [(0.001, None), (0.001, None)] # Positive values
+
+        for x0 in initial_guesses:
+            print(f"Initial guess: {x0}")
+            solution = minimize(objective, x0, method='L-BFGS-B', bounds=bounds) # Use 'L-BFGS-B' or 'TNC
+            solutions.append(solution.x)
+            objective_values.append(solution.fun)
+            
+            print(f"S_sc_exp = {solution.x[0]}, SwellingRatio = {solution.x[1]}")
+            print("Objective:", solution.fun)
+            print("")
+            
+        # Extract S_sc_exp and SwellingRatio from solutions
+        S_sc_exp_values = [solution[0] for solution in solutions]
+        SwellingRatio_values = [solution[1] for solution in solutions]
+
+        # Plot S_sc_exp
+        plt.figure(figsize=(5, 6))
+        plt.subplot(3, 1, 1)
+        plt.plot(S_sc_exp_values)
+        plt.xlabel('Iteration')
+        plt.ylabel('S_sc_exp')
+        plt.title('S_sc_exp vs Iteration')
+
+        # Plot SwellingRatio
+        plt.subplot(3, 1, 2)
+        plt.plot(SwellingRatio_values)
+        plt.xlabel('Iteration')
+        plt.ylabel('SwellingRatio')
+        plt.title('SwellingRatio vs Iteration')
+        
+        # Plot objective function
+        plt.subplot(3, 1, 3)
+        plt.plot(objective_values)
+        plt.xlabel('Iteration')
+        plt.ylabel('Objective')
+        plt.title('Objective Function vs Iteration')
+
+        plt.tight_layout()
+        plt.show()
+        
+        print(solutions)
+        
+        
+        return solutions
+        
+    def _solve_parameters_analytical(self): # analytically solving
+        # Import data object
+        data = SolPolExpData(self.sol, self.pol)
+        
+        # Import sorption data at specified T
+        _df = data.get_sorption_data(self.T)
+        
+        # Raise error if data, _df, is not found
+        if _df is None:
+            raise Exception(f"Data not found at T = {self.T} K.")            
+        
+        # Calculate corrected swelling using SAFT and exp data
+        mask = abs(_df["P[bar]"]*1e5 - self.P) <= (self.P*0.01)
+        
+        try:
+            m_net_exp = _df[mask]["MP1*[g]"].values[0] - data.m_met_filled
+            rho_f_exp = _df[mask]["ρ[g/cc]"].values[0]
+            V_b_exp = data.Vbasket
+            V_t0_exp = data.Vs
+            m_ptot_exp = data.ms
+            
+        except Exception as e:
+            print("Error: ")
+            print(e)
+            return None
+        
+        # Get omega_cr
+        omega_cr = self.omega_cr
+        
+        # Get rho_pol_cr
+        rho_p_c = self.rho_pol_cr  # [g/m^3]
+        
+        # Define the symbols
+        S_sc_exp, SwellingRatio = symbols('S_sc_exp SwellingRatio')
+        
+        # Define additional variables
+        S_am_exp = S_sc_exp / (1-self.omega_cr)  # [g/g]
+        
+        #* Use pmv2 so that Vs and Vp are constant
+        Vs, Vp = self.Vs_Vp_pmv1(self.T, self.P, S_am_exp)   # [m3/g]
+        # Vs, Vp = self.Vs_Vp_pmv2()   # [m3/g]
+        
+        rho_p_am = 1/(S_am_exp*Vs + Vp)  # [g/m^3]
+        rho_p_tol = 1/((1-omega_cr)/rho_p_am + omega_cr/rho_p_c)  # [g/m^3]
+        rho_tot = (1 + S_sc_exp) * rho_p_tol  # [g/m^3]
+        
+        # Define simulation equations
+        eq1 = Eq(S_sc_exp , (m_net_exp + rho_f_exp * (V_b_exp + V_t0_exp * (1 + SwellingRatio))) / m_ptot_exp)
+        eq2 = Eq(SwellingRatio , (rho_p_tol / rho_tot) * (1 + S_sc_exp) - 1)
+        
+        # Solve the equations
+        try:
+            solution = solve((eq1, eq2), (S_sc_exp, SwellingRatio))
+            print(f"S_sc_exp = {solution[S_sc_exp]}, SwellingRatio = {solution[SwellingRatio]}")
+        except Exception as e:
+            print("Error: ")
+            print(e)        
+        
+        return solution[S_sc_exp], solution[SwellingRatio]
+
+    def _solve_parameters_nsolve(self): # numerical solving
+        # Import data object
+        data = SolPolExpData(self.sol, self.pol)
+        
+        # Import sorption data at specified T
+        _df = data.get_sorption_data(self.T)
+        
+        # Raise error if data, _df, is not found
+        if _df is None:
+            raise Exception(f"Data not found at T = {self.T} K.")            
+        
+        # Calculate corrected swelling using SAFT and exp data
+        mask = abs(_df["P[bar]"]*1e5 - self.P) <= (self.P*0.01)
+        
+        try:
+            m_net_exp = _df[mask]["MP1*[g]"].values[0] - data.m_met_filled
+            rho_f_exp = _df[mask]["ρ[g/cc]"].values[0]
+            V_b_exp = data.Vbasket
+            V_t0_exp = data.Vs
+            m_ptot_exp = data.ms
+            
+        except Exception as e:
+            print("Error: ")
+            print(e)
+            return None
+        
+        # Get omega_cr
+        omega_cr = self.omega_cr
+        
+        # Get rho_pol_cr
+        rho_p_c = self.rho_pol_cr  # [g/m^3]
+        
+        # Define the symbols
+        S_sc_exp, SwellingRatio = symbols('S_sc_exp SwellingRatio')
+        
+        # Define additional variables
+        S_am_exp = S_sc_exp / (1-self.omega_cr)  # [g/g]
+        
+        #* Use pmv2 so that Vs and Vp are constant
+        # Vs, Vp = self.Vs_Vp_pmv1(self.T, self.P, S_am_exp)   # [m3/g]
+        Vs, Vp = self.Vs_Vp_pmv2()   # [m3/g]
+        
+        rho_p_am = 1/(S_am_exp*Vs + Vp)  # [g/m^3]
+        rho_p_tol = 1/((1-omega_cr)/rho_p_am + omega_cr/rho_p_c)  # [g/m^3]
+        rho_tot = (1 + S_sc_exp) * rho_p_tol  # [g/m^3]
+        
+        # Define simulation equations
+        eq1 = Eq(S_sc_exp , (m_net_exp + rho_f_exp * (V_b_exp + V_t0_exp * (1 + SwellingRatio))) / m_ptot_exp)
+        eq2 = Eq(SwellingRatio , (rho_p_tol / rho_tot) * (1 + S_sc_exp) - 1)
+        
+        # Initial guess        
+        # initial_guesses = [[0.01, 0.0], [0.01, 0.01], [0.01, 0.02], [0.01, 0.03]] # [S_sc_exp_guess, SwellingRatio_guess]
+        initial_guesses = [[S_sc_exp, SwellingRatio] \
+            for S_sc_exp in arange(0, 10., 0.1) \
+            for SwellingRatio in arange(0, 1., 0.01)]
+        
+        solutions = []
+        
+        # Iterate over the initial guesses
+        for guess in initial_guesses:
+            try:
+                # Solve the equations
+                solution = nsolve((eq1, eq2), (S_sc_exp, SwellingRatio), guess)
+                print(f"Initial guess: {guess}")
+                print(f"S_sc_exp = {solution[0]}, SwellingRatio = {solution[1]}")
+                print("")
+                solutions.append(solution)
+
+            except Exception as e:
+                print(f"Error with initial guess {guess}:")
+                print(e)
+        
+        # Extract S_sc_exp and SwellingRatio from solutions
+        S_sc_exp_values = [solution[0] for solution in solutions]
+        SwellingRatio_values = [solution[1] for solution in solutions]
+
+        # Plot S_sc_exp
+        plt.figure(figsize=(5, 6*2/3))  # (width, height)
+        plt.subplot(2, 1, 1)
+        plt.plot(S_sc_exp_values)
+        plt.xlabel('Iteration')
+        plt.ylabel('S_sc_exp')
+        plt.title('S_sc_exp vs Iteration')
+
+        # Plot SwellingRatio
+        plt.subplot(2, 1, 2)
+        plt.plot(SwellingRatio_values)
+        plt.xlabel('Iteration')
+        plt.ylabel('SwellingRatio')
+        plt.title('SwellingRatio vs Iteration')
+
+        plt.tight_layout()
+        plt.show()
+        
+        # return solution[S_sc_exp], solution[SwellingRatio]
+        
+    def _solve_parameters_plots(self):
+        # Import data object
+        data = SolPolExpData(self.sol, self.pol)
+        
+        # Import sorption data at specified T
+        _df = data.get_sorption_data(self.T)
+        
+        # Raise error if data, _df, is not found
+        if _df is None:
+            raise Exception(f"Data not found at T = {self.T} K.")            
+        
+        # Calculate corrected swelling using SAFT and exp data
+        mask = abs(_df["P[bar]"]*1e5 - self.P) <= (self.P*0.01)
+        
+        try:
+            m_net_exp = _df[mask]["MP1*[g]"].values[0] - data.m_met_filled  # [g]
+            rho_f_exp = _df[mask]["ρ[g/cc]"].values[0]  # [g/cc]
+            V_b_exp = data.Vbasket  # [cc]
+            V_t0_exp = data.Vs  # [cc]
+            m_ptot_exp = data.ms    # [g]
+            
+        except Exception as e:
+            print("Error: ")
+            print(e)
+            return None
+        
+        # Get omega_cr
+        omega_cr = self.omega_cr
+        
+        # Get rho_pol_cr
+        rho_p_c = self.rho_pol_cr  # [g/m^3]
+        
+        def equations(SwellingRatio):
+            
+            # Calculate S_sc_exp
+            S_sc_exp = (m_net_exp + rho_f_exp * (V_b_exp + V_t0_exp * (1 + SwellingRatio))) / m_ptot_exp
+            
+            # Calculate S_am_exp
+            S_am_exp = S_sc_exp / (1-self.omega_cr)  # [g/g]
+            
+            # Calculate pmv V_s and V_p
+            Vs, Vp = self.Vs_Vp_pmv1(self.T, self.P, S_am_exp)   # [m3/g]
+            
+            # Define auxiliary variables
+            rho_p_am = 1/(S_am_exp*Vs + Vp)  # [g/m^3]
+            rho_p_tol = 1/((1-omega_cr)/rho_p_am + omega_cr/rho_p_c)  # [g/m^3]
+            rho_tot = (1 + S_sc_exp) * rho_p_tol  # [g/m^3]
+        
+            # Define the equations in terms of these variables and instance variables
+            LHS = SwellingRatio
+            RHS = (rho_p_tol / rho_tot) * (1 + S_sc_exp) - 1
+            
+            return LHS-RHS, rho_p_tol, rho_tot, S_sc_exp
+        
+        # Evaluate SwellingRatio between 0 and 10
+        SwellingRatio_values = linspace(0, 0.1, 20)
+        
+        # Plot LHS-RHS vs SwellingRatio
+        eq_ab_values = [abs(equations(SwellingRatio)[0]) for SwellingRatio in SwellingRatio_values]
+        
+        plt.figure(figsize=(5, 8))  # (width, height)        
+        plt.subplot(4, 1, 1)
+        plt.plot(SwellingRatio_values, eq_ab_values)
+        plt.axhline(y=0, color='black', linestyle='--')  # Add solid horizontal line at y=0
+        plt.xlabel('SwellingRatio')
+        plt.ylabel('LHS-RHS')
+        plt.title('Equations vs SwellingRatio')
+        
+        # Plot ratio (rho_p_tol):(rho_tot) vs SwellingRatio        
+        ratio_values = [abs(equations(SwellingRatio)[1] / equations(SwellingRatio)[2]) for SwellingRatio in SwellingRatio_values]
+        
+        plt.subplot(4, 1, 2)
+        plt.plot(SwellingRatio_values, ratio_values)
+        plt.xlabel('SwellingRatio')
+        plt.ylabel(r'$\rho_{p,tot}$ : $\rho_{tot}$')
+        plt.title(r'$\rho_{p,tot}$:$\rho_{tot}$ vs SwellingRatio')
+        
+        # Plot S_sc_exp vs SwellingRatio
+        S_sc_exp_values = [equations(SwellingRatio)[3] for SwellingRatio in SwellingRatio_values]
+        print('S_sc_exp_values:', S_sc_exp_values)
+        
+        plt.subplot(4, 1, 3)
+        plt.plot(SwellingRatio_values, S_sc_exp_values)
+        plt.xlabel('SwellingRatio')
+        plt.ylabel(r'$S_{sc}^{exp}$')
+        plt.title('S_sc_exp vs SwellingRatio')
+        
+        # Plot (rho_p_tol):(rho_tot)*(1+S_sc_exp)
+        lumped_values = [(equations(SwellingRatio)[1] / equations(SwellingRatio)[2] * (1 + equations(SwellingRatio)[3])) for SwellingRatio in SwellingRatio_values]
+        print('lumped_values:', lumped_values)
+        plt.subplot(4, 1, 4)
+        plt.plot(SwellingRatio_values, lumped_values)
+        plt.xlabel('SwellingRatio')
+        plt.ylabel(r'$\frac{\rho_{p,tot}}{\rho_{tot}}$(1+$S_{sc}^{exp})$')
+        plt.title(r'$\frac{\rho_{p,tot}}{\rho_{tot}}$(1+$S_{sc}^{exp})$ vs SwellingRatio')
+        
+        plt.tight_layout()
+        plt.show()
+    
+    def solve_parameters_fsolve_NEW(self): # numerical solving
+        # Import data object
+        data = SolPolExpData(self.sol, self.pol)
+        
+        # Import sorption data at specified T
+        _df = data.get_sorption_data(self.T)
+        
+        # Raise error if data, _df, is not found
+        if _df is None:
+            raise Exception(f"Data not found at T = {self.T} K.")            
+        
+        # Calculate corrected swelling using SAFT and exp data
+        mask = abs(_df["P[bar]"]*1e5 - self.P) <= (self.P*0.01)
+        
+        try:
+            m_net_exp = _df[mask]["MP1*[g]"].values[0] - data.m_met_filled
+            
+            #* Use EXP values of rho_f
+            # rho_f = _df[mask]["ρ[g/cc]"].values[0]
+            
+            #* Use Span Wagner EoS values of rho_f
+            # rho_f = _df[mask]["ρSW[g/cc]"].values[0]
+            
+            #* Use SAFT EoS values of rho_f
+            rho_f = _df[mask]["ρSAFT[g/cc]"].values[0]
+            
+            V_b_exp = data.Vbasket
+            V_t0_exp = data.Vs
+            m_ptot_exp = data.ms
+            
+        except Exception as e:
+            print("Error: ")
+            print(e)
+            return None
+        
+        ## TEST
+        print(f'rho_f: {rho_f} g/cm^3')
+        ## /TEST
+        
+        # Get omega_cr
+        omega_cr = self.omega_cr
+        print(f'omega_cr: {omega_cr}')
+                
+        # Get rho_pol_cr
+        rho_p_c = self.rho_pol_cr  # [g/m^3]
+        print(f'rho_p_cr = {rho_p_c} g/m^3')
+        
+        def S_sc_exp(SwR):
+            # Calculate V_t0_exp based on calculated rho_tot(T,0,0)
+            rhoT00 = self.rho_tot(self.T, 1, 0)*1e-6  # [g/cm^3]  #* Default
+            V_t0_model = m_ptot_exp/rhoT00  # [cm^3]
+            
+            # rhoTP0 = self.rho_tot(self.T, self.P, 0)*1e-6  # [g/cm^3]    #* TEST
+            # V_t0_model = m_ptot_exp/rhoTP0  # [cm^3]
+            
+            # Compare rhoT00 and V_t0_exp
+            # print(f'V_t0_exp = {V_t0_exp} cm^3')
+            # print(f'V_t0_model = {V_t0_model} cm^3')
+            
+            #* Choose V_t0 values
+            # V_t0 = V_t0_exp  # [cm^3], exp value
+            V_t0 = V_t0_model  # [cm^3], calculated value
+            
+            # Calculate S_sc_exp
+            S_sc_exp = (m_net_exp + rho_f * (V_b_exp + V_t0 * (1 + SwR))) / m_ptot_exp
+            
+            return S_sc_exp
+            
+        def equation(SwellingRatio):
+            # Calculate S_sc_exp
+            S_sc = S_sc_exp(SwellingRatio)
+            
+            # Calculate rho_tot(T,0,0)
+            rhoT00 = self.rho_tot(self.T, 1, 0)  # [g/m^3], use P = 1 Pa
+            
+            # Calculate rho_tot(T,P,S)
+            rhoTPS = self.rho_tot(self.T, self.P, S_sc)  # [g/m^3]
+            
+            # Define the equations in terms of these variables and instance variables
+            LHS = SwellingRatio
+            RHS = (rhoT00 / rhoTPS) * (1 + S_sc) - 1
+            
+            return LHS-RHS    # Solve for LHS-RHS = 0
+        
+        
+        # *Initial guesses
+        initial_guesses = [i for i in linspace(0, 0.3, 6)]
+        
+        print("Initial guesses:", *initial_guesses)
+        
+        solutions = []
+
+        for x0 in initial_guesses:
+            print(f"Initial guess: {x0}")
+            try:
+                solution = fsolve(equation, x0, xtol=1.0e-10)
+                print('equation(solution[0]):', equation(solution[0]))
+                # if isclose([0], [equation(solution[0])], atol=1e-2): # isclose() requires input arrays #*Default
+                if isclose([0], [equation(solution[0])], atol=1e-4 if self.P < 80e5 else 1e-3): #* TEST
+                    solutions.append(solution[0])
+                    print(f"SwellingRatio = {solution[0]}")
+            except:
+                print(f"Initial guess {x0} failed.")
+                continue
+            
+        # Create a new matrix of unique solutions
+        unique_solutions = []
+
+        for solution in solutions:
+            # Only accept non-zero solution, accounting for negative values approaching zero at very low pressures (p < 10 Pa)
+            if (self.P < 10 and solution > -1e-4) or (self.P >= 10 and solution > 0):
+                
+                # Initialisation: if unique_solutions is empty, add the first solution
+                if not unique_solutions:
+                    unique_solutions.append(solution)
+                    
+                else:
+                    # Check if the solution is already in the unique_solutions list
+                    # if not any([isclose(solution, unique_solution, rtol=1e-2) for unique_solution in unique_solutions]):    #* Default
+                    if not any([isclose(solution, unique_solution, rtol=5e-2) for unique_solution in unique_solutions]):    #* TEST
+                        unique_solutions.append(solution)
+                        print('Solution appended:', solution)
+
+        # Print unique solutions
+        print('Unique solutions: ', *unique_solutions)
+        
+        # Extract S_sc_exp and SwellingRatio from solutions
+        SwellingRatio_values = [solution for solution in unique_solutions]
+        S_sc_exp_values = [S_sc_exp(SwR) for SwR in SwellingRatio_values]
+        print('')
+        print('SwellingRatio:', SwellingRatio_values)
+        print('S_sc:', S_sc_exp_values)
+        
+        if len(unique_solutions) == 1:
+            print('Single solution found.')
+        elif len(unique_solutions) > 1:
+            print('Multiple solutions found.')
+        elif len(unique_solutions) == 0:
+            print('No solution found.')
+            SwellingRatio_values, S_sc_exp_values = [None], [None]
+        
+        return SwellingRatio_values, S_sc_exp_values
+        
+    def solve_parameters_fsolve_NEW_noSwelling(self): # numerical solving
+        # Import data object
+        data = SolPolExpData(self.sol, self.pol)
+        
+        # Import sorption data at specified T
+        _df = data.get_sorption_data(self.T)
+        
+        # Raise error if data, _df, is not found
+        if _df is None:
+            raise Exception(f"Data not found at T = {self.T} K.")            
+        
+        # Calculate corrected swelling using SAFT and exp data
+        mask = abs(_df["P[bar]"]*1e5 - self.P) <= (self.P*0.01)
+        
+        try:
+            m_net_exp = _df[mask]["MP1*[g]"].values[0] - data.m_met_filled
+            rho_f_exp = _df[mask]["ρ[g/cc]"].values[0]
+            V_b_exp = data.Vbasket
+            V_t0_exp = data.Vs
+            m_ptot_exp = data.ms
+            
+        except Exception as e:
+            print("Error: ")
+            print(e)
+            return None
+        
+        # Get omega_cr
+        omega_cr = self.omega_cr
+        
+        # Get rho_pol_cr
+        rho_p_c = self.rho_pol_cr  # [g/m^3]
+        
+        def rho_tot(T, P, S_sc):
+            # Calculate S_am_exp
+            S_am = S_sc / (1-omega_cr)
+            
+            # Calculate pmv V_s and V_p
+            Vs, Vp = self.Vs_Vp_pmv1(T, P, S_am)   # [m3/g]
+            
+            # Calculte rho_tot
+            rho_p_am = 1/(S_am*Vs + Vp)  # [g/m^3]
+            rho_p_tol = 1/((1-omega_cr)/rho_p_am + omega_cr/rho_p_c)  # [g/m^3]
+            rho_tot = (1 + S_sc) * rho_p_tol  # [g/m^3]
+            
+            return rho_tot
+        
+        def S_sc_exp(SwR):
+            # Calculate S_sc_exp
+            S_sc_exp = (m_net_exp + rho_f_exp * (V_b_exp + V_t0_exp * (1 + SwR))) / m_ptot_exp
+            return S_sc_exp
+
+        # Extract S_sc_exp and SwellingRatio from solutions
+        SwellingRatio_values = [0]  # No swelling
+        S_sc_exp_values = [S_sc_exp(SwR) for SwR in SwellingRatio_values]
+        
+        return SwellingRatio_values[0], S_sc_exp_values[0]
+        
+    def solve_parameters_fsolve_NEW_pc(self, pc: float): # numerical solving
+        # Import data object
+        data = SolPolExpData(self.sol, self.pol)
+        
+        # Import sorption data at specified T
+        _df = data.get_sorption_data(self.T)
+        
+        # Raise error if data, _df, is not found
+        if _df is None:
+            raise Exception(f"Data not found at T = {self.T} K.")            
+        
+        # Calculate corrected swelling using SAFT and exp data
+        mask = abs(_df["P[bar]"]*1e5 - self.P) <= (self.P*0.01)
+        
+        try:
+            m_net_exp = _df[mask]["MP1*[g]"].values[0] - data.m_met_filled
+            rho_f_exp = _df[mask]["ρ[g/cc]"].values[0]
+            V_b_exp = data.Vbasket
+            V_t0_exp = data.Vs
+            m_ptot_exp = data.ms
+            
+        except Exception as e:
+            print("Error: ")
+            print(e)
+            return None
+        
+        # Get omega_cr
+        omega_cr = self.omega_cr
+        
+        # Get rho_pol_cr
+        rho_p_c = self.rho_pol_cr  # [g/m^3]
+        
+        # Effective pressure
+        p_eff = self.P + pc # [Pa]
+        
+        def rho_tot(T, P, S_sc):
+            # Calculate S_am_exp
+            S_am = S_sc / (1-omega_cr)
+            
+            # Calculate pmv V_s and V_p
+            Vs, Vp = self.Vs_Vp_pmv1(T, P, S_am)   # [m3/g]     #* Default
+            
+            # Calculte rho_tot
+            rho_p_am = 1/(S_am*Vs + Vp)  # [g/m^3]
+            rho_p_tol = 1/((1-omega_cr)/rho_p_am + omega_cr/rho_p_c)  # [g/m^3]
+            rho_tot = (1 + S_sc) * rho_p_tol  # [g/m^3]
+            
+            return rho_tot
+        
+        def S_sc_exp(SwR):
+            # Calculate S_sc_exp
+            S_sc_exp = (m_net_exp + rho_f_exp * (V_b_exp + V_t0_exp * (1 + SwR))) / m_ptot_exp
+            return S_sc_exp
+            
+        def equation(SwellingRatio):
+            # Calculate S_sc_exp
+            S_sc = S_sc_exp(SwellingRatio)
+            
+            # Calculate rho_tot(T,P,S)
+            rhoT00 = rho_tot(self.T, 1, 0)  # [g/m^3], use P = 1 Pa #TODO: Check if P = 1 Pa is correct
+            rhoTPS = rho_tot(self.T, p_eff, S_sc)  # [g/m^3]
+            
+            # Define the equations in terms of these variables and instance variables
+            LHS = SwellingRatio
+            RHS = (rhoT00 / rhoTPS) * (1 + S_sc) - 1
+            
+            return LHS-RHS    # Solve for LHS-RHS = 0
+        
+        
+        # *Initial guesses
+        # initial_guesses = [i for i in linspace(0, 0.5, 11)] #* Full range
+        initial_guesses = [i for i in linspace(0, 0., 2)]  # *TEST
+        
+        print("Initial guesses:", *initial_guesses)
+        
+        solutions = []
+
+        for x0 in initial_guesses:
+            print(f"Initial guess: {x0}")
+            try:
+                solution = fsolve(equation, x0)
+                print('equation(solution[0]):', equation(solution[0]))
+                if isclose([0], [equation(solution[0])], atol=1e-2): # isclose() requires input arrays
+                    solutions.append(solution[0])
+                    print(f"SwellingRatio = {solution[0]}")
+            except:
+                print(f"Initial guess {x0} failed.")
+                continue
+            
+        # Create a new matrix of unique solutions
+        unique_solutions = []
+
+        for solution in solutions:
+            # Only accept non-zero solution, accounting for negative values approaching zero at very low pressures (p < 10 Pa)
+            if (self.P < 10 and solution > -1e-4) or (self.P >= 10 and solution > 0):
+                
+                # Initialisation: if unique_solutions is empty, add the first solution
+                if not unique_solutions:
+                    unique_solutions.append(solution)
+                    
+                else:
+                    # Check if the solution is already in the unique_solutions list
+                    if not any([isclose(solution, unique_solution, rtol=1e-2) for unique_solution in unique_solutions]):
+                        unique_solutions.append(solution)
+                        print('Solution appended:', solution)
+
+        # Print unique solutions
+        print('Unique solutions: ', *unique_solutions)
+        
+        # Extract S_sc_exp and SwellingRatio from solutions
+        SwellingRatio_values = [solution for solution in unique_solutions]
+        S_sc_exp_values = [S_sc_exp(SwR) for SwR in SwellingRatio_values]
+        print('')
+        print('SwellingRatio:', SwellingRatio_values)
+        print('S_sc:', S_sc_exp_values)
+
+        # # Plot S_sc_exp vs. iterations
+        # plt.figure(figsize=(5, 4))  # (width, height)
+        # plt.subplot(2, 1, 1)
+        # plt.plot(S_sc_exp_values)
+        # plt.xlabel('Iteration')
+        # plt.ylabel('S_sc_exp')
+        # plt.title('S_sc_exp vs Iteration')
+
+        # # Plot SwellingRatio
+        # plt.subplot(2, 1, 2)
+        # plt.plot(SwellingRatio_values)
+        # plt.xlabel('Iteration')
+        # plt.ylabel('SwellingRatio')
+        # plt.title('SwellingRatio vs Iteration')
+
+        # plt.tight_layout()
+        # plt.show()
+        
+        if len(unique_solutions) == 1:
+            print('Single solution found.')
+            return SwellingRatio_values, S_sc_exp_values
+        elif len(unique_solutions) > 1:
+            print('Multiple solutions found.')
+            return SwellingRatio_values, S_sc_exp_values
+        elif len(unique_solutions) == 0:
+            print('No solution found.')
+            return None, None
+        
+    def solve_parameters_plots_NEW(self):
+        # Import data object
+        data = SolPolExpData(self.sol, self.pol)
+        
+        # Import sorption data at specified T
+        _df = data.get_sorption_data(self.T)
+        
+        # Raise error if data, _df, is not found
+        if _df is None:
+            raise Exception(f"Data not found at T = {self.T} K.")            
+        
+        # Calculate corrected swelling using SAFT and exp data
+        mask = abs(_df["P[bar]"]*1e5 - self.P) <= (self.P*0.01)
+        
+        try:
+            m_net_exp = _df[mask]["MP1*[g]"].values[0] - data.m_met_filled  # [g]
+            
+            #* Use EXP values of rho_f
+            # rho_f = _df[mask]["ρ[g/cc]"].values[0]
+            
+            #* Use Span Wagner EoS values of rho_f
+            rho_f = _df[mask]["ρSW[g/cc]"].values[0]
+            
+            #* Use SAFT EoS values of rho_f
+            # rho_f = _df[mask]["ρSAFT[g/cc]"].values[0]
+            
+            V_b_exp = data.Vbasket  # [cc]
+            V_t0_exp = data.Vs  # [cc]
+            m_ptot_exp = data.ms    # [g]
+            
+        except Exception as e:
+            print("Error: ")
+            print(e)
+            return None
+        
+        # Get omega_cr
+        omega_cr = self.omega_cr
+        
+        # Get rho_pol_cr
+        rho_p_c = self.rho_pol_cr  # [g/m^3]
+        
+        # Calculate V_t0_exp based on calculated rho_tot(T,0,0)
+        rhoT00 = self.rho_tot(self.T, 1, 0)*1e-6  # [g/cm^3]
+        V_t0_model = m_ptot_exp/rhoT00  # [cm^3]
+        
+        #* Choose V_t0 values
+        V_t0 = V_t0_exp  # [cm^3], exp value
+        # V_t0 = V_t0_model  # [cm^3], calculated value
+        
+        def equations(SwellingRatio):            
+            # Calculate S_sc_exp
+            S_sc_exp = (m_net_exp + rho_f * (V_b_exp + V_t0 * (1 + SwellingRatio))) / m_ptot_exp
+            
+            # Calculate rho_tot(T,P,S)
+            rhoT00 = self.rho_tot(self.T, 1, 0)  # [g/m^3]
+            rhoTPS = self.rho_tot(self.T, self.P, S_sc_exp)  # [g/m^3]
+            
+            # Define the equations in terms of these variables and instance variables
+            LHS = SwellingRatio
+            RHS = (rhoT00 / rhoTPS) * (1 + S_sc_exp) - 1
+            
+            return LHS-RHS, rhoT00, rhoTPS, S_sc_exp
+        
+        def get_SinglePhaseDensity(SwellingRatio):
+            # Calculate S_sc
+            S_sc = (m_net_exp + rho_f * (V_b_exp + V_t0 * (1 + SwellingRatio))) / m_ptot_exp
+            
+            # Calculate S_am
+            S_am = S_sc / (1-omega_cr)
+            
+            # Calculate x
+            omega_p = 1/(S_am+1)     # [g/g]
+            omega_s = 1 - omega_p   # [g/g]
+            x_s = (omega_s/self.MW_sol) / (omega_s/self.MW_sol + omega_p/self.MW_pol)   #[mol/mol]
+            x_p = 1 - x_s   #[mol/mol]           
+            x = hstack([x_s, x_p])   # [mol/mol]
+            
+            # Calculate mixture Density
+            rho = self.SinglePhaseDensity(x, self.T, self.P, 'L')   # [mol/m^3]
+            
+            return rho
+        
+        #* Evaluate SwellingRatio between 0 and 0.5
+        SwellingRatio_values = linspace(0, 0.1, 10)
+        
+        # Plot LHS-RHS vs SwellingRatio
+        eq_values = []
+        for SwellingRatio in SwellingRatio_values:
+            try:
+                eq_values.append(equations(SwellingRatio)[0])
+            except:
+                eq_values.append(None)
+        print('eq_values:', eq_values)
+        
+        plt.figure(figsize=(3, 1.8*4))  # (width, height)    
+        plt.subplot(4, 1, 1)
+        plt.plot(SwellingRatio_values, eq_values)
+        plt.axhline(y=0, color='black', linestyle='--')  # Add solid horizontal line at y=0
+        plt.xlabel('SwellingRatio')
+        plt.ylabel('LHS-RHS')
+        plt.title('Equations vs SwellingRatio')
+        
+        # Plot ratio (rho_p_tol):(rho_tot) vs SwellingRatio
+        ratio_values = []
+        for SwellingRatio in SwellingRatio_values:
+            try:
+                ratio_values.append(equations(SwellingRatio)[1] / equations(SwellingRatio)[2])
+            except:
+                ratio_values.append(None)
+        print('ratio_values:', ratio_values)
+        
+        plt.subplot(4, 1, 2)
+        plt.plot(SwellingRatio_values, ratio_values)
+        plt.xlabel('SwellingRatio')
+        plt.ylabel(r'$\rho_{tot}$(T,0,0) : $\rho_{tot}(T,P,S_{sc}$)')
+        plt.title(r'$\rho_{tot}$(T,0,0):$\rho_{tot}(T,P,S_{sc})$ vs SwellingRatio')
+        
+        # Plot S_sc_exp vs SwellingRatio
+        S_sc_exp_values = []
+        for SwellingRatio in SwellingRatio_values:
+            try:
+                S_sc_exp_values.append(equations(SwellingRatio)[3])
+            except:
+                S_sc_exp_values.append(None)
+        print('S_sc_exp_values:', S_sc_exp_values)
+        
+        plt.subplot(4, 1, 3)
+        plt.plot(SwellingRatio_values, S_sc_exp_values)
+        plt.xlabel('SwellingRatio')
+        plt.ylabel(r'$S_{sc}$')
+        plt.title('S_sc vs SwellingRatio')
+        
+        # Plot (rho_tot(T,0,0))):(rho_tot(T,P,S))*(1+S_sc_exp)
+        lumped_values = []
+        for SwellingRatio in SwellingRatio_values:
+            try:
+                lumped_values.append((equations(SwellingRatio)[1] / equations(SwellingRatio)[2] * (1 + equations(SwellingRatio)[3])))
+            except:
+                lumped_values.append(None)
+        print('lumped_values:', lumped_values)
+        
+        plt.subplot(4, 1, 4)
+        plt.plot(SwellingRatio_values, lumped_values)
+        plt.xlabel('SwellingRatio')
+        plt.ylabel(r'$\frac{\rho_{tot} \left( T,0,0 \right) }{\rho_{tot} \left( T,P,S_{sc} \right)}(1+S_{sc})$')
+        plt.title(r'$\frac{\rho_{tot} \left( T,0,0 \right) }{\rho_{tot} \left( T,P,S_{sc} \right)}(1+S_{sc})$ vs SwellingRatio')
+        
+        # Plot SinglePhaseDenisty vs SwellingRatio
+        # rho_values = []
+        # for SwellingRatio in SwellingRatio_values:
+        #     try:
+        #         rho_values.append(get_SinglePhaseDensity(SwellingRatio))
+        #     except:
+        #         rho_values.append(None)
+        # print('rho_values:', rho_values)
+        
+        # plt.subplot(5, 1, 5)
+        # plt.plot(SwellingRatio_values, rho_values)
+        # plt.xlabel('SwellingRatio')
+        # plt.ylabel(r'$\rho_{tot}$')
+        # plt.title(r'$\rho_{tot}$ vs SwellingRatio')
+        
+        plt.tight_layout()
+        plt.show()
+    
+    def solve_parameters_plots_NEW2(self):
+        # Import data object
+        data = SolPolExpData(self.sol, self.pol)
+        
+        # Import sorption data at specified T
+        _df = data.get_sorption_data(self.T)
+        
+        # Raise error if data, _df, is not found
+        if _df is None:
+            raise Exception(f"Data not found at T = {self.T} K.")            
+        
+        # Calculate corrected swelling using SAFT and exp data
+        mask = abs(_df["P[bar]"]*1e5 - self.P) <= (self.P*0.01)
+        
+        try:
+            m_net_exp = _df[mask]["MP1*[g]"].values[0] - data.m_met_filled  # [g]
+            
+            #* Use EXP values of rho_f
+            # rho_f = _df[mask]["ρ[g/cc]"].values[0]
+            
+            #* Use Span Wagner EoS values of rho_f
+            rho_f = _df[mask]["ρSW[g/cc]"].values[0]
+            
+            #* Use SAFT EoS values of rho_f
+            # rho_f = _df[mask]["ρSAFT[g/cc]"].values[0]
+            
+            V_b_exp = data.Vbasket  # [cc]
+            V_t0_exp = data.Vs  # [cc]
+            m_ptot_exp = data.ms    # [g]
+            
+        except Exception as e:
+            print("Error: ")
+            print(e)
+            return None
+        
+        # Get omega_cr
+        omega_cr = self.omega_cr
+        
+        # Get rho_pol_cr
+        rho_p_c = self.rho_pol_cr  # [g/m^3]
+        
+        # Calculate V_t0_exp based on calculated rho_tot(T,0,0)
+        rhoT00 = self.rho_tot(self.T, 1, 0)*1e-6  # [g/cm^3]
+        V_t0_model = m_ptot_exp/rhoT00  # [cm^3]
+        
+        #* Choose V_t0 values
+        # V_t0 = V_t0_exp  # [cm^3], exp value
+        V_t0 = V_t0_model  # [cm^3], calculated value
+        
+        def equations(S_sc):            
+            # Calculate rho_tot(T,P,S)
+            rhoT00 = self.rho_tot(self.T, 1, 0)*1e-6  # [g/cm^3]
+            rhoTPS = self.rho_tot(self.T, self.P, S_sc)*1e-6  # [g/cm^3]
+            
+            # Numerator and denominator of RHS
+            numerator1 = m_net_exp
+            numerator2 = rho_f * (V_b_exp + m_ptot_exp / rhoTPS)
+            numerator = numerator1 + numerator2
+            denominator = m_ptot_exp - rho_f * m_ptot_exp / rhoTPS
+            
+            # Define the equations in terms of these variables and instance variables
+            LHS = S_sc
+            RHS = numerator / denominator
+            
+            return LHS-RHS, numerator1, numerator2, numerator, denominator, RHS, m_ptot_exp / rhoTPS
+        
+        #* Evaluate SwellingRatio between 0 and 0.5
+        S_sc_values = linspace(0, 0.3, 30)
+        
+        eq_values = []
+        numerator1_values = []
+        numerator2_values = []
+        numerator_values = []
+        denominator_values = []
+        RHS_values = []
+        basket_sample_values = []
+        for S_sc in S_sc_values:
+            try:
+                result = equations(S_sc)
+            except:
+                result = [None, None, None, None, None, None, None]
+            
+            eq_values.append(result[0])
+            numerator1_values.append(result[1])
+            numerator2_values.append(result[2])
+            numerator_values.append(result[3])
+            denominator_values.append(result[4])
+            RHS_values.append(result[5])
+            basket_sample_values.append(V_b_exp-result[6])
+            
+        print('eq_values:', eq_values)
+        print('numerator1_values:', numerator1_values)
+        print('numerator2_values:', numerator2_values)
+        print('numerator_values:', numerator_values)
+        print('denominator_values:', denominator_values)
+        print('RHS_values:', RHS_values)
+        print('basket_sample_values:', basket_sample_values)
+        
+        # Plot LHS-RHS vs S_sc
+        plt.figure(figsize=(3, 1.8*7))  # (width, height)    
+        plt.subplot(7, 1, 1)
+        plt.plot(S_sc_values, eq_values)
+        plt.axhline(y=0, color='black', linestyle='--')  # Add solid horizontal line at y=0
+        plt.xlabel(r'$S_{sc}$ [g/g]')
+        plt.ylabel('LHS-RHS')
+        plt.title(f'T = {self.T-273} °C, P = {self.P} Pa')
+        
+        # Plot numerator vs S_sc        
+        plt.subplot(7, 1, 2)
+        plt.plot(S_sc_values, numerator1_values)
+        plt.xlabel(r'$S_{sc}$ [g/g]')
+        plt.ylabel(r'$m_{raw} (T,P)$')
+        
+        # Plot numerator vs S_sc        
+        plt.subplot(7, 1, 3)
+        plt.plot(S_sc_values, numerator2_values)
+        plt.xlabel(r'$S_{sc}$ [g/g]')
+        plt.ylabel(r'$\rho_{CO2} (T,P) \left[ V_{basket} + \frac{m_{p}}{\rho_{tot}(T,P,S_{sc})} \right]$')
+        
+        # Plot (V_b - m_p/rho_tot)) vs S_sc        
+        plt.subplot(7, 1, 4)
+        plt.plot(S_sc_values, basket_sample_values)
+        plt.xlabel(r'$S_{sc}$ [g/g]')
+        plt.ylabel(r'$V_{basket}-\frac{m_{p}}{\rho_{tot}(T,P,S_{sc})}$ [$cm^{3}$]')
+        
+        # Plot numerator vs S_sc        
+        plt.subplot(7, 1, 5)
+        plt.plot(S_sc_values, numerator_values)
+        plt.xlabel(r'$S_{sc}$ [g/g]')
+        plt.ylabel('Numerator')
+        
+        # Plot denominator vs S_sc
+        plt.subplot(7, 1, 6)
+        plt.plot(S_sc_values, denominator_values)
+        plt.xlabel(r'$S_{sc}$ [g/g]')
+        plt.ylabel('Denominator')
+        
+        # Plot RHS vs S_sc
+        plt.subplot(7, 1, 7)
+        plt.plot(S_sc_values, RHS_values)
+        plt.xlabel(r'$S_{sc}$ [g/g]')
+        plt.ylabel('RHS')
+        
+        plt.tight_layout()
+        plt.show()
+    
+    def solve_parameters_fsolve_NEW_integration(self): # numerical solving
+        # Import data object
+        data = SolPolExpData(self.sol, self.pol)
+        
+        # Import sorption data at specified T
+        _df = data.get_sorption_data(self.T)
+        
+        # Raise error if data, _df, is not found
+        if _df is None:
+            raise Exception(f"Data not found at T = {self.T} K.")            
+        
+        # Calculate corrected swelling using SAFT and exp data
+        mask = abs(_df["P[bar]"]*1e5 - self.P) <= (self.P*0.01)
+        
+        try:
+            m_net_exp = _df[mask]["MP1*[g]"].values[0] - data.m_met_filled
+            rho_f_exp = _df[mask]["ρ[g/cc]"].values[0]
+            V_b_exp = data.Vbasket
+            V_t0_exp = data.Vs
+            m_ptot_exp = data.ms
+            
+        except Exception as e:
+            print("Error: ")
+            print(e)
+            return None
+        
+        ## TEST
+        print(f'rho_f_exp: {rho_f_exp} g/cm^3')
+        ## /TEST
+        
+        # Get omega_cr
+        omega_cr = self.omega_cr
+        
+        # Get rho_pol_cr
+        rho_p_c = self.rho_pol_cr  # [g/m^3]
+        
+        def rho_tot(T, P, S_sc):
+            # Calculate S_am_exp
+            S_am = S_sc / (1-omega_cr)
+            
+            # Calculte rho_tot
+            V_p_am = self.get_V_p_am(T, P, S_am)  # [m3/g]
+            rho_p_am = 1/(V_p_am)  # [g/m^3]
+            rho_p_tol = 1/((1-omega_cr)/rho_p_am + omega_cr/rho_p_c)  # [g/m^3]
+            rho_tot = (1 + S_sc) * rho_p_tol  # [g/m^3]
+            
+            return rho_tot
+        
+        def S_sc_exp(SwR):
+            # Calculate S_sc_exp
+            S_sc_exp = (m_net_exp + rho_f_exp * (V_b_exp + V_t0_exp * (1 + SwR))) / m_ptot_exp
+            return S_sc_exp
+            
+        def equation(SwellingRatio):
+            # Calculate S_sc_exp
+            S_sc = S_sc_exp(SwellingRatio)
+            
+            # Calculate rho_tot(T,0,0)
+            rhoT00 = rho_tot(self.T, 1, 0)  # [g/m^3], use P = 1 Pa #TODO: Check if P = 1 Pa is correct
+            
+            # Calculate rho_tot(T,P,S)
+            rhoTPS = rho_tot(self.T, self.P, S_sc)  # [g/m^3]
+            
+            # Define the equations in terms of these variables and instance variables
+            LHS = SwellingRatio
+            RHS = (rhoT00 / rhoTPS) * (1 + S_sc) - 1
+            
+            return LHS-RHS    # Solve for LHS-RHS = 0
+        
+        # *Initial guesses
+        # initial_guesses = [i for i in linspace(0, 0.5, 11)] #* Full range
+        initial_guesses = [i for i in linspace(0, 0.3, 3)]  # *TEST
+        
+        print("Initial guesses:", *initial_guesses)
+        
+        solutions = []
+
+        for x0 in initial_guesses:
+            print(f"Initial guess: {x0}")
+            try:
+                solution = fsolve(equation, x0)
+                print('equation(solution[0]):', equation(solution[0]))
+                if isclose([0], [equation(solution[0])], atol=1e-2): # isclose() requires input arrays
+                    solutions.append(solution[0])
+                    print(f"SwellingRatio = {solution[0]}")
+            except:
+                print(f"Initial guess {x0} failed.")
+                continue
+            
+        # Create a new matrix of unique solutions
+        unique_solutions = []
+
+        for solution in solutions:
+            # Only accept non-zero solution, accounting for negative values approaching zero at very low pressures (p < 10 Pa)
+            if (self.P < 10 and solution > -1e-4) or (self.P >= 10 and solution > 0):
+                
+                # Initialisation: if unique_solutions is empty, add the first solution
+                if not unique_solutions:
+                    unique_solutions.append(solution)
+                    
+                else:
+                    # Check if the solution is already in the unique_solutions list
+                    if not any([isclose(solution, unique_solution, rtol=1e-2) for unique_solution in unique_solutions]):
+                        unique_solutions.append(solution)
+                        print('Solution appended:', solution)
+
+        # Print unique solutions
+        print('Unique solutions: ', *unique_solutions)
+        
+        # Extract S_sc_exp and SwellingRatio from solutions
+        SwellingRatio_values = [solution for solution in unique_solutions]
+        S_sc_exp_values = [S_sc_exp(SwR) for SwR in SwellingRatio_values]
+        print('')
+        print('SwellingRatio:', SwellingRatio_values)
+        print('S_sc:', S_sc_exp_values)
+
+        # # Plot S_sc_exp vs. iterations
+        # plt.figure(figsize=(5, 4))  # (width, height)
+        # plt.subplot(2, 1, 1)
+        # plt.plot(S_sc_exp_values)
+        # plt.xlabel('Iteration')
+        # plt.ylabel('S_sc_exp')
+        # plt.title('S_sc_exp vs Iteration')
+
+        # # Plot SwellingRatio
+        # plt.subplot(2, 1, 2)
+        # plt.plot(SwellingRatio_values)
+        # plt.xlabel('Iteration')
+        # plt.ylabel('SwellingRatio')
+        # plt.title('SwellingRatio vs Iteration')
+
+        # plt.tight_layout()
+        # plt.show()
+        
+        if len(unique_solutions) == 1:
+            print('Single solution found.')
+            return SwellingRatio_values, S_sc_exp_values
+        elif len(unique_solutions) > 1:
+            print('Multiple solutions found.')
+            return SwellingRatio_values, S_sc_exp_values
+        elif len(unique_solutions) == 0:
+            print('No solution found.')
+            return None, None
+        
     ### INDEPENDENT functions
-    def SinglePhaseDensity(self, x:array , T: float, P: float):
+    
+    def SinglePhaseDensity(self, x:array , T: float, P: float, phase:str = None):
         """Function to calculate single phase density of mixture without specifying phase.
         Unit = [mol/m^3]
 
@@ -232,14 +1479,18 @@ class DetailedSolPol(BaseSolPol):
             T (float): Temperature [K].
             P (float): Pressure [Pa].
         """
+        
+        
         rhoL = self.eos_mix.density(x, T, P, "L")   # [mol/m^3]
         rhoV = self.eos_mix.density(x, T, P, "V")   # [mol/m^3]
         
-        if isclose(P, self.eos_mix.pressure(x,rhoL,T), P*0.01):
+        if phase == 'L':
             rho = rhoL
+            # print("L phase")
             
-        elif isclose(P, self.eos_mix.pressure(x,rhoV,T), P*0.01):
+        elif phase == 'V':
             rho = rhoV
+            # print("V phase")
         
         return rho
     
@@ -256,7 +1507,7 @@ class DetailedSolPol(BaseSolPol):
         muad_sol_ext = eos_sol.muad(rho_1, T) / (8.314 * T)  # [adim]
         return muad_sol_ext
 
-    def V_sol(self, x: array, T: float, P:float, eps:float = 1.0e-5): 
+    def V_sol(self, x: array, T: float, P:float, eps:float = 1.0e-10):   #* default: eps=1.0e-5
         """Function to calculate partial volume of solute in mixture. 
         Assuming constant in condensed phase.
         Unit = [m3/g].
@@ -277,14 +1528,15 @@ class DetailedSolPol(BaseSolPol):
         x_up = hstack([(n_sol+eps)/n_up, n_pol/n_up])  #[mol/m^3]
         x_lo = hstack([(n_sol-eps)/n_lo, n_pol/n_lo])  #[mol/m^3]        
         
+        # Eq. 6
         if n_sol > eps:
-            dV_dns = (n_up/self.SinglePhaseDensity(x_up, T, P)-n_lo/self.SinglePhaseDensity(x_lo, T, P))/(2*eps)    # [m^3/mol]
+            dV_dns = (n_up/self.SinglePhaseDensity(x_up, T, P, 'L')-n_lo/self.SinglePhaseDensity(x_lo, T, P, 'L'))/(2*eps)    # [m^3/mol]
         else: #case where n_sol = 0
-            dV_dns = (n_up/self.SinglePhaseDensity(x_up, T, P)-n/self.SinglePhaseDensity(x, T, P))/(eps) # [m^3/mol]
+            dV_dns = (n_up/self.SinglePhaseDensity(x_up, T, P, 'L')-n/self.SinglePhaseDensity(x, T, P, 'L'))/(eps) # [m^3/mol]
         
         return dV_dns/self.MW_sol   # [m^3/g]
 
-    def V_pol(self, x: array, T: float, P:float, eps:float = 1.0e-5): 
+    def V_pol(self, x: array, T: float, P:float, eps:float = 1.0e-10):   #* default: eps=1.0e-5
         """Function to calculate partial volume of polymer in mixture. 
         Assuming constant in condensed phase.
         Unit = [m3/g].
@@ -304,22 +1556,24 @@ class DetailedSolPol(BaseSolPol):
         x_up = hstack([n_sol/n_up,(n_pol+eps)/n_up])  #[mol/m^3]
         x_lo = hstack([n_sol/n_lo,(n_pol-eps)/n_lo])  #[mol/m^3]        
         
+        # Eq. 6
         if n_pol > eps:
-            dV_dnp = (n_up/self.SinglePhaseDensity(x_up, T, P)-n_lo/self.SinglePhaseDensity(x_lo, T, P))/(2*eps)    # [m^3/mol]
+            dV_dnp = (n_up/self.SinglePhaseDensity(x_up, T, P, 'L')-n_lo/self.SinglePhaseDensity(x_lo, T, P, 'L'))/(2*eps)    # [m^3/mol]
         else: #case where n_sol = 0
-            dV_dnp = (n_up/self.SinglePhaseDensity(x_up, T, P)-n/self.SinglePhaseDensity(x, T, P))/(eps) # [m^3/mol]
+            dV_dnp = (n_up/self.SinglePhaseDensity(x_up, T, P, 'L')-n/self.SinglePhaseDensity(x, T, P, 'L'))/(eps) # [m^3/mol]
         
         return dV_dnp / self.MW_pol # [m^3/g]
     
-    def Vs_Vp_pmv1(self):
+
+    def Vs_Vp_pmv1(self, T: float, P: float, S_a: float):
         """Function to calculate partial volume of solute in mixture, using pmv method 1.
         pmv method 1: using solubility composition.
         Unit = [m3/g]
 
         """
-        T = self.T
-        P = self.P
-        S_a = self.S_am  # [g/g]    
+        # T = self.T
+        # P = self.P        
+        
         omega_p = 1/(S_a+1)     # [g/g]
         omega_s = 1 - omega_p   # [g/g]
         x_s = (omega_s/self.MW_sol) / (omega_s/self.MW_sol + omega_p/self.MW_pol)   #[mol/mol]
@@ -352,8 +1606,39 @@ class DetailedSolPol(BaseSolPol):
         V_p = self.V_pol(hstack([0., 1.]), T, 1e5)  # [m^3/g]
         return V_s, V_p
     
+    def get_V_p_am(self, T:  float, P: float, S_a: float):
+        def func_Vs(S):
+            Vs, _Vp = self.Vs_Vp_pmv1(T, P, S)   # [m3/g]
+            return (Vs)  #[m^3/g]
+        # def func_Vp(S):
+        #     Vs, Vp = self.Vs_Vp_pmv1(T, P, S)   # [m3/g]
+        #     return (Vp)  #[m^3/g]
+        # Assuming Vp does not change with S_a
+        _, Vp = self.Vs_Vp_pmv2()   # [m3/g]
+        
+        # Use integrate.quad()
+        # int_result_Vs, error_Vs = integrate.quad(func_Vs, 0, S_a)
+        # int_result_Vp, error_Vp = integrate.quad(func_Vp, 0, 1)
+        
+        
+        # Use trapz()
+        N = 5
+        x1 = linspace(0, S_a, N+1)
+        y1 = [func_Vs(s) for s in x1]
+        y1 = array(y1)
+        
+        # x2 = linspace(0, 1, N+1)
+        # y2 = [func_Vp(s) for s in x2]
+        # y2 = array(y2)
+        
+        int_result_Vs = trapz(y1, x1)
+        # int_result_Vp = trapz(y2, x2)
+        
+        return int_result_Vs + Vp
+        
+
     def get_omega_cr(self, T: float):
-        """Function to get omega_cr as a function of T. Reads data from excel sheet called /data_example.xlsx.
+        """Function to get omega_cr as a function of T. Reads data from excel sheet called /data_CO2-HDPE_trimmed.xlsx.
         Ref: [1]: Polymer, 59, 2015, 270-277.
         
         """
@@ -371,7 +1656,12 @@ class DetailedSolPol(BaseSolPol):
         
         if self.pol == "HDPE":
             # print(df.dtypes)  # Chek data types
-            omega_c = df[df["T (°C)"] == (T-273)]["omega_cr_HDPE"].values[0]
+            
+            # Use literature values
+            # omega_c = df[df["T (°C)"] == (T-273)]["omega_cr_HDPE"].values[0]
+            
+            # Use converged values based on convergence between exp data and SAFT values of V_t0
+            omega_c = df[df["T (°C)"] == (T-273)]["rho_cr_HDPE_converged (g/cm3)"].values[0]
             
         else:
             omega_c = 0
@@ -401,9 +1691,9 @@ class DetailedSolPol(BaseSolPol):
             _rho_pol_cr = 1000   # [g/cm^3]
         
         rho_pol_cr = _rho_pol_cr *1e6   # [g/m^3]
-        return rho_pol_cr    
+        return rho_pol_cr
     
-    def get_S_am(self, T: float, P: float):
+    def get_S_am_EOS(self, T: float, P: float):
         """Solve solubility in amorphous rubbery polymer at equilibrium.
         
         Args:
@@ -411,9 +1701,11 @@ class DetailedSolPol(BaseSolPol):
             P (float): Pressure [Pa].
         
         """
+        
         MW_sol = self.MW_sol
         MW_pol = self.MW_pol
-        # chemical potential of external gas (EQ)
+        
+        # Chemical potential of external gas (EQ)
         muad_s_ext = self.muad_sol_ext
         eos_mix = self.eos_mix
                 
@@ -424,11 +1716,13 @@ class DetailedSolPol(BaseSolPol):
             
             _rho_i = _x * _rhol  # [mol/m^3-mix]
             _muad_m = eos_mix.muad(_rho_i, T)  # dimensionless [mu/RT]
+            
+            # Eq. 1
             _muad_s_m = _muad_m[0]      # dimensionless chemical potential of solute in sol-pol mixture
             return [_muad_s_m - muad_s_ext]
         
         x0_sol_single = self.options.get("x0_sol", None)
-        x0_sol_range = self.options.get("x0_sol_range", linspace(1e-6, 0.99999999, 30).tolist())
+        x0_sol_range = self.options.get("x0_sol_range", linspace(1e-6, 0.99999999, 50).tolist())
         
         if x0_sol_single is None:
             x0_list = x0_sol_range
@@ -443,12 +1737,10 @@ class DetailedSolPol(BaseSolPol):
                 solution = fsolve(func, x0=float(x0_list[i]))
                 residue = func(_x_1=solution)
                 x_sol = solution[0]  # [mol-sol/mol-mix]
-                residue_float = [float(i) for i in residue]
+                residue_float = [float(i) for i in residue]                
                 
-                # if isclose(residue_float, [0.0], rtol=0.01).all() == True and x_sol >= 0 and x_sol <= 1: #*Original
-                if isclose(residue_float, [0.0]).all() == True:    #*TEST
+                if isclose(residue_float, [0.0]).all() == True:    
                     # print(x_sol)
-                    # TODO sovle issues with this bound check. Caused by in adequate x0 for fsolve.
                     if x_sol > 1:
                         raise Exception("x > 1")
                     elif x_sol < 0:
@@ -464,19 +1756,43 @@ class DetailedSolPol(BaseSolPol):
         print("Failed to find solution within max iteractions number")
         print("")
         return None
-
+    
     ### DEPENDENT functions
+    def rho_tot(self, T, P, S_sc, omega_cr = None):
+        if omega_cr == None:
+            omega_cr = self.omega_cr
+        
+        # Get rho_pol_cr
+        rho_p_c = self.rho_pol_cr  # [g/m^3]
+        
+        # Calculate S_am_exp
+        S_am = S_sc / (1-omega_cr)
+        
+        # Calculate pmv V_s and V_p
+        Vs, Vp = self.Vs_Vp_pmv1(T, P, S_am)   # [m3/g]     #* Default
+        # Vs, Vp = self.Vs_Vp_pmv2()   # [m3/g]         #* TEST
+        
+        # Calculte rho_tot
+        rho_p_am = 1/(S_am*Vs + Vp)  # [g/m^3]
+        rho_p_tol = 1/((1-omega_cr)/rho_p_am + omega_cr/rho_p_c)  # [g/m^3]
+        rho_tot = (1 + S_sc) * rho_p_tol  # [g/m^3]
+        
+        # print(f'_rho_p_c = {rho_p_c} g/m^3')
+        # print(f"_rho_tot = {rho_tot} g/m^3")
+        return rho_tot
+    
     def get_rho_am(self):
         """Function to get density of amorphous domain of polymer.
         Unit = [g/m^3]
         
         """
         
-        S_a = self.S_am  # [g/g]
+        # Use exp
+        S_a = self.S_am_exp  # [g/g]
 
         #* METHOD 1: Evaluate Vs and Vp at each composition, most robust
         if self.pmv_method == "1":
-            V_s, V_p =  self.Vs_Vp_pmv1()            
+            V_s, V_p =  self.Vs_Vp_pmv1(self.T, self.P, S_a)            
         
         #* METHOD 2: Assuming Vs and Vp same as specific volume at __infinitely dilution__ 
         if self.pmv_method == "2":
@@ -486,34 +1802,44 @@ class DetailedSolPol(BaseSolPol):
         if self.pmv_method == "3":
             V_s, V_p =  self.Vs_Vp_pmv3()
 
+        # Eq. 8         
         rho_am = 1 / (S_a*V_s + V_p) # [g/m^3]
+        
         return rho_am
 
-    def get_omega_am(self):
-        S_a = self.S_am
+    def get_omega_am_EOS(self):
+        S_a = self.S_am_EOS
+        
+        # Eq. 3
         omega_p = 1/(S_a+1)     # [g/g]
+        
         omega_s = 1 - omega_p   # [g/g]
         return hstack([omega_s, omega_p])
     
-    def get_x_am(self):
-        w = self.omega_am
+    def get_x_am_EOS(self):
+        w = self.omega_am_EOS
         omega_s = w[0]
         omega_p = w[1]
         x_s = (omega_s/self.MW_sol) / (omega_s/self.MW_sol + omega_p/self.MW_pol)   #[mol/mol]
         return hstack([x_s, 1-x_s])
     
-    def get_S_sc(self):
+    def get_S_sc_EOS(self):
         """Function to calculate overall solubility of sol in pol, adjsuted for omega_cr.
 
         """
+        
         # Get omega_cr
         omega_c = self.omega_cr
+        
         # Get solubility in amorphous domain
-        S_a = self.S_am    #[g/g]
+        S_a = self.S_am_EOS    #[g/g]
+        
         # Get solubility in semi-crystalline polymer
+        # Eq. 4
         S_sc = S_a * (1-omega_c)  # [g/g]
+        
         return S_sc
-
+        
     def get_rho_mix(self):
         """Function to get total density of mixture.
         Unit = [g/m^3]
@@ -522,8 +1848,13 @@ class DetailedSolPol(BaseSolPol):
         omega_c = self.omega_cr
         rho_pol_am = self.rho_am  # [g/m^3]
         rho_pol_cr = self.rho_pol_cr  # [g/m^3]
-        S = self.S_sc # [g_sol/g_pol]
+        
+        # Use S_sc from exp
+        S = self.S_sc_exp # [g_sol/g_pol]
+        
+        # Eq. 14
         rho_mix = (1 + S) / ((1-omega_c)/rho_pol_am + omega_c/rho_pol_cr) # [g/m^3]
+        
         return rho_mix
 
     def get_rho_mix_0(self):
@@ -533,19 +1864,124 @@ class DetailedSolPol(BaseSolPol):
         omega_c = self.omega_cr  # [g/g]
         rho_pol_cr = self.rho_pol_cr  # [g/m^3]
         rho_pol_am = self.SinglePhaseDensity(array([0., 1.]), self.T, P=1)*self.MW_pol # [g/m^3] #!check P=1
+        
+        # Eq. 16
         rho_pol = 1 / ((1-omega_c)/rho_pol_am + omega_c/rho_pol_cr) # [g/m63]
+        
         return rho_pol
 
     def get_SwellingRatio(self):
         """Function to get swelling ratio.
-        """
         
-        SR = (self.rho_mix_0 / self.rho_mix * (1 + self.S_sc)) - 1
+        """
+        # Eq. 21
+        SR = (self.rho_mix_0 / self.rho_mix * (1 + self.S_sc_EOS)) - 1
+        
         return SR
 
+    def get_S_sc_exp_uncorr(self):
+        """Function to get solubility in semi-crystalline polymer, uncorrected for swelling.
+        
+        """
+        # Import data object
+        data = SolPolExpData(self.sol, self.pol)
+        
+        # Import sorption data at specified T
+        _df = data.get_sorption_data(self.T)
+        
+        # Raise error if data, _df, is not found
+        if _df is None:
+            raise Exception(f"Data not found at T = {self.T} K.")            
+        
+        # Calculate corrected swelling using SAFT and exp data
+        mask = abs(_df["P[bar]"]*1e5 - self.P) <= (self.P*0.01)
+        
+        try:
+            m_net_exp = _df[mask]["MP1*[g]"].values[0] - data.m_met_filled
+            rho_f_exp = _df[mask]["ρ[g/cc]"].values[0]
+            V_b_exp = data.Vbasket
+            V_t0_exp = data.Vs
+            m_ptot_exp = data.ms
+        except Exception as e:
+            print("Error: ")
+            print(e)
+            return None
+        
+        # Eq. 17
+        S_sc_exp_uncorr = (m_net_exp + rho_f_exp * (V_b_exp + V_t0_exp)) / m_ptot_exp # [g/g]
+        
+        return S_sc_exp_uncorr        
+    
+    def get_S_sc_exp(self):
+        """Function to get solubility in semi-crystalline polymer, corrected for swelling.
+        
+        """
+        SwR = self.SwellingRatio
+        
+        # Import data object
+        data = SolPolExpData(self.sol, self.pol)
+        
+        # Import sorption data at specified T
+        _df = data.get_sorption_data(self.T)
+        
+        # Raise error if data, _df, is not found
+        if _df is None:
+            raise Exception(f"Data not found at T = {self.T} K.")            
+        
+        # Calculate corrected swelling using SAFT and exp data
+        mask = abs(_df["P[bar]"]*1e5 - self.P) <= (self.P*0.01)
+        
+        try:
+            m_net_exp = _df[mask]["MP1*[g]"].values[0] - data.m_met_filled
+            rho_f_exp = _df[mask]["ρ[g/cc]"].values[0]
+            V_b_exp = data.Vbasket
+            V_t0_exp = data.Vs
+            m_ptot_exp = data.ms
+            
+        except Exception as e:
+            print("Error: ")
+            print(e)
+            return None
+        
+        # Eq. 18
+        S_sc_exp_corr = (m_net_exp + rho_f_exp * (V_b_exp + V_t0_exp * (1 + SwR))) / m_ptot_exp # [g/g]
+        
+        return S_sc_exp_corr
 
+    def get_S_am_exp(self):
+        
+        # Get omega_cr
+        omega_c = self.omega_cr
+        
+        # Get S_sc from exp
+        S_sc = self.S_sc_exp # [g_sol/g_pol]
+        
+        # Get S_am from exp
+        # Eq. 4
+        S_a = S_sc / (1-omega_c)  # [g/g]
+        
+        return S_a
+    
+    def get_omega_am_exp(self):
+        S_a = self.S_am_exp
+        
+        # Eq. 3
+        omega_p = 1/(S_a+1)     # [g/g]
+        
+        omega_s = 1 - omega_p   # [g/g]
+        return hstack([omega_s, omega_p])
+        
+    def get_x_am_exp(self):
+        w = self.omega_am_exp
+        omega_s = w[0]
+        omega_p = w[1]
+        
+        x_s = (omega_s/self.MW_sol) / (omega_s/self.MW_sol + omega_p/self.MW_pol)   #[mol/mol]
+        
+        return hstack([x_s, 1-x_s])
+        
 class SolPolExpData():
-    def __init__(self, sol: str, pol: str, data_file="data_example.xlsx"):
+    def __init__(self, sol: str, pol: str, data_file="data_CO2-HDPE.xlsx"):
         self.sol = sol
         self.pol = pol
         # mixture = SolPolMixture(sol, pol)
@@ -578,6 +2014,26 @@ class SolPolExpData():
     def get_sorption_data(self, T: float):
         df = pd.read_excel(self.file, sheet_name=f"{T-273}C")
         return df
+
+def find_omega_cr(base_obj, T):
+    obj = DetailedSolPol(base_obj, T, 1)
+    
+    # Get experimental data
+    data = SolPolExpData(obj.sol, obj.pol)
+    V_t0_exp = data.Vs   # [cm^3]
+    m_ptot_exp = data.ms    # [g]
+    
+    def eq(_omega_cr):
+        # Calculate V_t0_exp based on calculated rho_tot(T,0,0)
+        rhoT00 = obj.rho_tot(obj.T, 1, 0, _omega_cr)*1e-6  # [g/cm^3]
+        V_t0_model = m_ptot_exp/rhoT00  # [cm^3]
+        
+        return V_t0_exp - V_t0_model
+    
+    omega_cr = fsolve(eq, 0.5)[0]
+    # print('omega_cr:', omega_cr)
+    
+    return omega_cr
 
 def fit_epskl(base_obj, T:float, x0: float = 200, epskl_bounds:tuple = (100, 500), **kwargs):
     """Function to fit eps_kl to fit SAFT prediction to corected experimental data.
@@ -620,7 +2076,7 @@ def fit_epskl(base_obj, T:float, x0: float = 200, epskl_bounds:tuple = (100, 500
             
             # Solubility prediction from SAFT
             try:
-                _S_SAFT = obj.S_sc
+                _S_SAFT = obj.S_sc_EOS
             except:
                 _S_SAFT = None            
             
@@ -647,119 +2103,7 @@ def fit_epskl(base_obj, T:float, x0: float = 200, epskl_bounds:tuple = (100, 500
     print("Objective function value at optimised: ", fobj(result.x))
     return result.x, fobj(result.x)
 
-def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False, display_fig:bool=True, save_fig:bool=False):
-    """Function to plot sorption of EOS and experimental data (not corrected for swelling).
-
-    Args:
-        spm (class object): class object representing the sol-pol mixture.
-        T (float): temperature [K].
-        P (float): pressure [Pa].
-        export_data (bool): export data.
-    """
-    data = SolPolExpData(base_obj.sol, base_obj.pol)
-    now = datetime.now()  # current time
-    time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM
-    
-    P_SAFT={}
-    S_SAFT={}
-    
-    # Finding largest pressure value in experimental data
-    _df = {}
-    for i, T in enumerate(T_list):    
-        _df[T]=data.get_sorption_data(T)
-        max_i = _df[T]["P[bar]"].max()
-        if i == 0:
-            pbar_max = max_i
-        else:
-            pbar_max = max(pbar_max, max_i)
-    
-    # Set pressure ponits for SAFT predictions
-    for i, T in enumerate(T_list):
-        P_SAFT[T] = linspace(1, pbar_max*1e5, 100)  # [Pa]    
-    
-    df={}
-    for i, T in enumerate(T_list):
-        
-        _df=data.get_sorption_data(T)
-        
-        # Sorption without swelling correction
-        S_exp_woSW = (_df["MP1*[g]"]-data.m_met_filled+_df["ρ[g/cc]"]*(data.Vs+data.Vbasket)) / data.ms
-        _df['S_exp_woSW[g/g]']=S_exp_woSW
-        
-        # Calculate swelling ratio from SAFT
-        objects = []
-        SwR_SAFT = []
-        for j, _p in enumerate(_df["P[bar]"].values *1e5):
-            if j == 0:
-                obj = DetailedSolPol(base_obj, T, _p,)
-            else:
-                x0_list = update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
-                obj = DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list,)
-            objects.append(obj)
-            SwR_SAFT.append(obj.SwellingRatio)
-
-        _df['SwR_SAFT[cc/cc]'] = SwR_SAFT
-        # Sorption with swelling correction
-        S_exp_SW = (_df["MP1*[g]"]-data.m_met_filled+_df["ρ[g/cc]"]*(data.Vs*(1+_df['SwR_SAFT[cc/cc]'])+data.Vbasket)) / data.ms
-        _df['S_exp_SW[g/g]'] = S_exp_SW
-        
-        # Calculate S_sc for continuous SAFT line        
-        objects = []
-        S_SAFT[T] = []        
-        for j, _p in enumerate(P_SAFT[T]):
-            if j == 0:
-                obj = DetailedSolPol(base_obj, T, _p,)
-            else:
-                x0_list = update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
-                obj = DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list,)
-            objects.append(obj)
-            S_SAFT[T].append(obj.S_sc)
-            
-        # Calculate S_sc at experimental pressure points
-        objects = []
-        S_SAFT_pexp = []
-        for j, _p in enumerate(_df["P[bar]"]*1e5):
-            if j == 0:
-                obj = DetailedSolPol(base_obj, T, _p,)
-            else:
-                x0_list = update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
-                obj = DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list,)
-            objects.append(obj)
-            S_SAFT_pexp.append(obj.S_sc)
-        _df['S_SAFT[g/g]'] = S_SAFT_pexp
-        
-        df[T] = _df
-        print("")
-        print("T = ", T)
-        print(df[T])
-        print("")
-    
-    
-    if export_data == True:
-        export_path = f"{data.path}/PlotIsothermEOSvExp_{time_str}.xlsx"
-        with pd.ExcelWriter(export_path) as writer:
-            for T in T_list:
-                df[T].to_excel(writer, sheet_name=f"{T-273}C", index=False)
-        print("Data successfully exported to: ", export_path)
-    
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    for i, T in enumerate(T_list):
-        ax.plot(df[T]["P[bar]"],df[T]['S_exp_woSW[g/g]'],color=custom_colours[i], linestyle="None", marker="o",label=f"{T-273}°C exp - uncorrected")
-        ax.plot(df[T]["P[bar]"],df[T]['S_exp_SW[g/g]'],color=custom_colours[i], linestyle="None", marker="x",label=f"{T-273}°C exp - corrected")
-        ax.plot(P_SAFT[T]*1e-5,S_SAFT[T],color=custom_colours[i], linestyle="solid",marker="None",label=f"{T-273}°C SAFT")
-    ax.set_xlabel("P [bar]")
-    ax.set_ylabel("S [g/g]")
-    ax.tick_params(direction="in")
-    ax.legend().set_visible(True)
-    if display_fig == True:
-        plt.show()
-    if save_fig == True:
-        save_fig_path = f"{data.path}/IsothermEpsEOSvExp_{time_str}.png"
-        plt.savefig(save_fig_path, dpi=1200, transparent=True)
-        print(f"Plot successfully exported to {save_fig_path}.")
-
-def plot_isotherm_pmv(base_obj, T_list:list[float], export_data:bool = False):
+def plot_isotherm_pmv(base_obj, T_list:list[float], export_data:bool = False, display_fig:bool=True, save_fig:bool=False):
     """Function to plot sorption of EOS and experimental data to compare different partial molar volume approaches.
 
     Args:
@@ -768,6 +2112,8 @@ def plot_isotherm_pmv(base_obj, T_list:list[float], export_data:bool = False):
         P (float): pressure [Pa].
         export_data (bool): export data.
     """
+    now = datetime.now()  # current time
+    time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM
     data = SolPolExpData(base_obj.sol, base_obj.pol)
     
     df = pd.DataFrame()
@@ -812,7 +2158,7 @@ def plot_isotherm_pmv(base_obj, T_list:list[float], export_data:bool = False):
                     x0_list = update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
                     obj = DetailedSolPol(base_obj, T, _p, pmv_method=k, x0_sol_range = x0_list,)
                 objects.append(obj)
-                S_SAFT_pmv_pexp.append(obj.S_sc)
+                S_SAFT_pmv_pexp.append(obj.S_sc_EOS)
             _df[f'S_SAFT_pmv{k}[g/g]'] = S_SAFT_pmv_pexp            
             
             # Calculates sorption from SAFT predictions only
@@ -826,7 +2172,7 @@ def plot_isotherm_pmv(base_obj, T_list:list[float], export_data:bool = False):
                     x0_list = update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
                     obj = DetailedSolPol(base_obj, T, _p, pmv_method=k, x0_sol_range = x0_list,)
                 objects.append(obj)
-                S_SAFT_pmv[k].append(obj.S_sc)
+                S_SAFT_pmv[k].append(obj.S_sc_EOS)
         
         df = pd.concat([df, _df], ignore_index=True)
         
@@ -862,10 +2208,16 @@ def plot_isotherm_pmv(base_obj, T_list:list[float], export_data:bool = False):
         ax.plot(df_SAFT[mask2]["P [Pa]"]*1e-5, df_SAFT[mask2]["S_sc_pmv2 [g/g]"],color=custom_colours[2], linestyle="solid",marker="None",label=f"{T-273}°C SAFT pmv2")
         ax.plot(df_SAFT[mask2]["P [Pa]"]*1e-5, df_SAFT[mask2]["S_sc_pmv3 [g/g]"],color=custom_colours[3], linestyle="solid",marker="None",label=f"{T-273}°C SAFT pmv3")
     ax.set_xlabel("P [bar]")
-    ax.set_ylabel("S [g/g]")
+    ax.set_ylabel(r"$S_{sc}$ [$g_{sol}$/$g_{pol \: sc}$]")
+    ax.set_ylim(top=0.15)
     ax.tick_params(direction="in")
     ax.legend().set_visible(True)
-    plt.show()
+    if display_fig == True:
+        plt.show()
+    if save_fig == True:
+        save_fig_path = f"{data.path}/Anals/IsothermPmv_{time_str}.png"
+        plt.savefig(save_fig_path, dpi=1200)
+        print(f"Plot successfully exported to {save_fig_path}.")
 
 def plot_VsVp_pmv(base_obj, T: float, display_fig:bool=True, save_fig:bool=False):
     """Function to plot partial molar volume isotherms at single temperature.
@@ -948,11 +2300,11 @@ def plot_VsVp_pmv(base_obj, T: float, display_fig:bool=True, save_fig:bool=False
     if display_fig == True:
         plt.show()
     if save_fig == True:
-        save_fig_path = f"{data.path}/PlotVsVp_{time_str}.png"
+        save_fig_path = f"{data.path}/Anals/PlotVsVp_{time_str}.png"
         plt.savefig(save_fig_path, dpi=1200)
         print(f"Plot successfully exported to {save_fig_path}.")
 
-def plot_isotherm_epskl_EOS(base_obj, T_list: list, P_list: list, eps_list: list, export_data:bool=False):
+def plot_isotherm_epskl_EOS(base_obj, T_list: list, P_list: list, eps_list: list, export_data:bool=False, display_fig:bool=True, save_fig:bool=False):
     """Function to plot solubility isotherms for multiple eps_kl values at specified T, P.
 
     Args:
@@ -962,6 +2314,9 @@ def plot_isotherm_epskl_EOS(base_obj, T_list: list, P_list: list, eps_list: list
         eps_list (list): epsilon_kl list.
         export_data (bool, optional): export data. Defaults to False.
     """
+    data = SolPolExpData(base_obj.sol, base_obj.pol)
+    now = datetime.now()  # current time
+    time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM    
     
     solubility = []
     
@@ -980,7 +2335,7 @@ def plot_isotherm_epskl_EOS(base_obj, T_list: list, P_list: list, eps_list: list
                     obj = DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list,)
                 
                 try:                    
-                    _S = obj.S_sc
+                    _S = obj.S_sc_EOS
                 except:
                     _S = None
                 
@@ -1009,8 +2364,9 @@ def plot_isotherm_epskl_EOS(base_obj, T_list: list, P_list: list, eps_list: list
             mask = (df['T [K]'] == T) & (df['eps_kl'] == eps)
             ax.plot(df[mask]['P [Pa]']*1e-5, df[mask]['S_sc [g/g]'], color=custom_colours[i+1], linestyle="solid", marker=custom_markers[j], label=f"{T-273}°C eps={eps}")
     ax.set_xlabel("P [bar]")
-    ax.set_ylabel("S [g/g]")
-    ax.set_yscale('log')
+    ax.set_ylabel(r"$S_{sc}$ [$g_{sol}$/$g_{pol \: sc}$]")
+    ax.set_ylim(top=1.70)
+    # ax.set_yscale('log')
     ax.tick_params(direction="in")
     
     # Legends
@@ -1020,8 +2376,12 @@ def plot_isotherm_epskl_EOS(base_obj, T_list: list, P_list: list, eps_list: list
                              label=f"T = {T-273}°C") for i, T in enumerate(T_list)]
     legend = legend_colours + legend_markers
     ax.legend(handles=legend)
-    
-    plt.show()
+    if display_fig == True:
+        plt.show()
+    if save_fig == True:
+        save_fig_path = f"{data.path}/Anals/IsothermEpsEOSvExp_{time_str}.png"
+        plt.savefig(save_fig_path, dpi=1200)
+        print(f"Plot successfully exported to {save_fig_path}.")    
 
 def plot_isotherm_epskl_EOSvExp(base_obj, T_list: list, eps_list:list, export_data:bool=False, display_fig:bool=True, save_fig:bool=False):
     """Functio to plot solubility isotherms for chosen eps_kl values at different 
@@ -1058,7 +2418,7 @@ def plot_isotherm_epskl_EOSvExp(base_obj, T_list: list, eps_list:list, export_da
                 
                 # Calculate solubility prediction from SAFT
                 try:
-                    _S_SAFT = obj.S_sc
+                    _S_SAFT = obj.S_sc_EOS
                 except:
                     _S_SAFT = None
                 
@@ -1101,11 +2461,11 @@ def plot_isotherm_epskl_EOSvExp(base_obj, T_list: list, eps_list:list, export_da
             ax2.plot(df[mask]['P [Pa]']*1e-5, df[mask]['S_sc_exp_corrected [g/g]'], color=custom_colours[i+1], linestyle="solid", marker=custom_markers[j], label=f"{T-273}°C eps={eps}")
     for ax in ax1, ax2:
         ax.set_xlabel("P [bar]")
-        ax.set_ylabel("S [g/g]")
-        ax.set_yscale('log')
+        ax.set_ylabel(r"$S_{sc}$ [$g_{sol}$/$g_{pol \: sc}$]")
+        # ax.set_yscale('log')
         ax.tick_params(direction="in")
-    ax1.set_title("SAFT prediction")
-    ax2.set_title("Experimental with swelling correction")
+    # ax1.set_title("SAFT prediction")
+    # ax2.set_title("Experimental with swelling correction")
     # ax1.set_ylim(top=1.)
     # ax2.set_ylim(top=2.)
     
@@ -1117,13 +2477,13 @@ def plot_isotherm_epskl_EOSvExp(base_obj, T_list: list, eps_list:list, export_da
     legend = legend_colours + legend_markers
     ax2.legend(handles=legend)
     
-    if display_fig == True:
-        plt.show()
     if save_fig == True:
-        save_fig_path = f"{data.path}/IsothermEpsEOSvExp_{time_str}.png"
-        plt.savefig(save_fig_path, dpi=1200, transparent=True)
+        save_fig_path = f"{data.path}/Anals/IsothermEpsEOSvExp_{time_str}.png"
+        plt.savefig(save_fig_path, dpi=1200)
         print(f"Plot successfully exported to {save_fig_path}.")
-
+    if display_fig == True:
+        plt.show()    
+    
 if __name__ == "__main__":    
     mix = BaseSolPol("CO2","HDPE")
     # data = SolPolExpData(mix.sol, mix.pol)
@@ -1134,20 +2494,23 @@ if __name__ == "__main__":
     # print("omaga_am = ", obj.omega_am)
     # mix.pmv_method = "2"
     
-    plot_isotherm_EOSvExp(mix,[25+273, 35+273, 50+273], export_data=False, display_fig=False, save_fig=True)
-    # plot_isotherm_pmv(mix, [50+273,], export_data=False)
+    # plot_isotherm_EOSvExp(mix,[25+273, 35+273, 50+273], export_data=False, display_fig=False, save_fig=True)
     # for T in [25+273, 35+273, 50+273]:
+    #     plot_isotherm_pmv(mix, [T], export_data=False, display_fig=False, save_fig=True)
     #     plot_VsVp_pmv(mix, T, display_fig=False, save_fig=True)
     
     #* eps_kl_EOS
-    # plot_isotherm_epskl_EOS(mix, T_list=[25+273,], P_list=linspace(1, 200e5, 5), 
-    #                   eps_list=[276.45, 276.45*0.95, 276.45*1.05], 
-    #                   export_data=False)
+    
+    # for T in [25+273, 35+273, 50+273]:
+    #     plot_isotherm_epskl_EOS(mix, T_list=[T], P_list=linspace(1, 200e5, 5), \
+    #         eps_list=[276.45, 276.45*0.95, 276.45*1.05], \
+    #             export_data=False, display_fig=False, save_fig=True)
     
     #* eps_kl_EOSvsExp
-    # plot_isotherm_epskl_EOSvExp(mix, T_list=[25+273, 35+273, 50+273],
-    #                   eps_list=[276.45, 276.45*0.95, 276.45*1.05], 
-    #                   export_data=False)
+    # for T in [25+273, 35+273, 50+273]:
+    #     plot_isotherm_epskl_EOSvExp(mix, T_list=[T],
+    #                     eps_list=[276.45, 276.45*0.95, 276.45*1.05], 
+    #                     export_data=False,  display_fig=False, save_fig=True)
     
     #* fit_epskl    
     # eps25_pmv1, fobj25_pmv1 = fit_epskl(mix, T=25+273, x0=200, epskl_bounds=(200, 300), pmv_method = "1")
@@ -1291,3 +2654,6 @@ if __name__ == "__main__":
     # ax.set_ylabel("S_sc [g/g]")
     # ax.legend().set_visible(True)
     # plt.show()
+    
+    #* Solve SwR and S_sc_exp
+    

@@ -29,6 +29,7 @@ def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False
         P (float): pressure [Pa].
         export_data (bool): export data.
     """
+    
     data = S.SolPolExpData(base_obj.sol, base_obj.pol)
     now = datetime.now()  # current time
     time_str = now.strftime("%y%m%d_%H%M")  #YYMMDD_HHMM
@@ -57,24 +58,33 @@ def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False
         
         # Sorption without swelling correction
         S_exp_woSW = (_df["MP1*[g]"]-data.m_met_filled+_df["ρ[g/cc]"]*(data.Vs+data.Vbasket)) / data.ms
-        _df['S_exp_woSW[g/g]']=S_exp_woSW
+        _df['S_exp_uncorr [g/g]']=S_exp_woSW
         
-        # Calculate swelling ratio from SAFT
+        # Calculate S_sc for experimental pressure points
         objects = []
-        SwR_SAFT = []
+        SwR = []
+        S_exp = []
         for j, _p in enumerate(_df["P[bar]"].values *1e5):
             if j == 0:
                 obj = S.DetailedSolPol(base_obj, T, _p,)
             else:
-                x0_list = S.update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
+                x0_list = S.update_x0_sol_list(previous_x0_sol=objects[j-1].x_am_EOS[0])
                 obj = S.DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list,)
             objects.append(obj)
-            SwR_SAFT.append(obj.SwellingRatio)
-
-        _df['SwR_SAFT[cc/cc]'] = SwR_SAFT
+            SwR.append(obj.SwellingRatio)
+            S_exp.append(obj.S_sc_exp)
+        
+        # Add swelling ratio to dataframe
+        print("Swelling ratio: ", SwR)
+        _df['SwR_SAFT [cc/cc]'] = SwR
+        
+        # Add S_exp to dataframe
+        print("S_exp: ", S_exp)
+        _df['S_exp [g/g]'] = S_exp       
+        
+        
         # Sorption with swelling correction
-        S_exp_SW = (_df["MP1*[g]"]-data.m_met_filled+_df["ρ[g/cc]"]*(data.Vs*(1+_df['SwR_SAFT[cc/cc]'])+data.Vbasket)) / data.ms
-        _df['S_exp_SW[g/g]'] = S_exp_SW
+        # S_exp_SW = (_df["MP1*[g]"]-data.m_met_filled+_df["ρ[g/cc]"]*(data.Vs*(1+_df['SwR_SAFT[cc/cc]'])+data.Vbasket)) / data.ms
         
         # Calculate S_sc for continuous SAFT line        
         objects = []
@@ -86,9 +96,9 @@ def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False
                 x0_list = S.update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
                 obj = S.DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list,)
             objects.append(obj)
-            S_SAFT[T].append(obj.S_sc)
+            S_SAFT[T].append(obj.S_sc_EOS)
             
-        # Calculate S_sc at experimental pressure points
+        # Calculate S_sc at experimental pressure points for dataframe
         objects = []
         S_SAFT_pexp = []
         for j, _p in enumerate(_df["P[bar]"]*1e5):
@@ -98,15 +108,18 @@ def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False
                 x0_list = S.update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
                 obj = S.DetailedSolPol(base_obj, T, _p, x0_sol_range = x0_list,)
             objects.append(obj)
-            S_SAFT_pexp.append(obj.S_sc)
-        _df['S_SAFT[g/g]'] = S_SAFT_pexp
+            S_SAFT_pexp.append(obj.S_sc_EOS)
         
+        # Add S_SAFT to dataframe
+        print("S_SAFT_pexp: ", S_SAFT_pexp)
+        _df['S_SAFT [g/g]'] = S_SAFT_pexp
+        
+        # Print dataframe at T
         df[T] = _df
         print("")
         print("T = ", T)
         print(df[T])
-        print("")
-    
+        print("")    
     
     if export_data == True:
         export_path = f"{data.path}/PlotIsothermEOSvExp_{time_str}.xlsx"
@@ -118,32 +131,31 @@ def plot_isotherm_EOSvExp(base_obj, T_list:list[float], export_data:bool = False
     fig = plt.figure()
     ax = fig.add_subplot(111)
     for i, T in enumerate(T_list):
-        # Uncorrected
-        # ax.plot(df[T]["P[bar]"],df[T]['S_exp_woSW[g/g]'],color=S.custom_colours[i], linestyle="None", marker="o",label=f"{T-273}°C exp - uncorrected")
-        
-        # Corrected
-        ax.plot(df[T]["P[bar]"],df[T]['S_exp_SW[g/g]'],color=S.custom_colours[i], linestyle="None", marker="x",label=f"{T-273}°C exp - corrected")
-        
-        # EoS Prediction
-        ax.plot(P_SAFT[T]*1e-5,S_SAFT[T],color=S.custom_colours[i], linestyle="solid",marker="None",label=f"{T-273}°C SAFT")
+        ax.plot(df[T]["P[bar]"], df[T]['S_exp_uncorr [g/g]'], color=S.custom_colours[i], linestyle="None", marker="o",label=f"{T-273}°C exp - uncorrected")
+        ax.plot(df[T]["P[bar]"], df[T]['S_exp [g/g]'], color=S.custom_colours[i], linestyle="None", marker="x",label=f"{T-273}°C exp - corrected")
+        ax.plot(P_SAFT[T]*1e-5,S_SAFT[T], color=S.custom_colours[i], linestyle="solid", marker="None",label=f"{T-273}°C SAFT")
+    
     ax.set_xlabel("P [bar]")
-    ax.set_ylabel(r"$S_{sc}$ [$g_{sol}$/$g_{pol \: sc}$]")
+    ax.set_ylabel("S [g/g]")
     ax.tick_params(direction="in")
     ax.legend().set_visible(True)
-    if display_fig == True:
-        plt.show()
+    
     if save_fig == True:
-        save_fig_path = f"{data.path}/IsothermEpsEOSvExp_{time_str}.png"
+        save_fig_path = f"{data.path}/Anals/IsothermEpsEOSvExp_{time_str}.png"
         plt.savefig(save_fig_path, dpi=1200)
         print(f"Plot successfully exported to {save_fig_path}.")
+    if display_fig == True:
+        plt.show()
+
 
 if __name__ == "__main__":
     mix = S.BaseSolPol("CO2","HDPE")
-    # plot_isotherm_EOSvExp(mix,[25+273, 35+273, 50+273], export_data=False, display_fig=False, save_fig=True)
+    plot_isotherm_EOSvExp(mix, [25+273, 35+273, 50+273],
+                          export_data=False, display_fig=True, save_fig=False)
 
-    mix.modify_kl(259.78)
-    plot_isotherm_EOSvExp(mix, T_list=[25+273], export_data=False, display_fig=False, save_fig=True)
-    mix.modify_kl(244.23)
-    plot_isotherm_EOSvExp(mix, T_list=[35+273], export_data=False, display_fig=False, save_fig=True)
-    mix.modify_kl(251.05)
-    plot_isotherm_EOSvExp(mix, T_list=[50+273], export_data=False, display_fig=False, save_fig=True)
+    # mix.modify_kl(259.78)
+    # plot_isotherm_EOSvExp(mix, T_list=[25+273], export_data=False, display_fig=False, save_fig=True)
+    # mix.modify_kl(244.23)
+    # plot_isotherm_EOSvExp(mix, T_list=[35+273], export_data=False, display_fig=False, save_fig=True)
+    # mix.modify_kl(251.05)
+    # plot_isotherm_EOSvExp(mix, T_list=[50+273], export_data=False, display_fig=False, save_fig=True)
