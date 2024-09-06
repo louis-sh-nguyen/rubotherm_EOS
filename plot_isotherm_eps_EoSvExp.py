@@ -63,7 +63,7 @@ def plot_isotherm_epskl_EOSvExp(base_obj, T_list: list, eps_list:list, export_da
                 
                 # Calculate solubility prediction from SAFT
                 try:
-                    _S_SAFT = obj.S_sc
+                    _S_SAFT = obj.S_sc_EOS
                 except:
                     _S_SAFT = None
                 

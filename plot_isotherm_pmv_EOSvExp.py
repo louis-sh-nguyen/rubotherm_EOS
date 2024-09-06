@@ -82,7 +82,7 @@ def plot_isotherm_pmv(base_obj, T_list:list[float], export_data:bool = False, di
                     x0_list = S.update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
                     obj = S.DetailedSolPol(base_obj, T, _p, pmv_method=k, x0_sol_range = x0_list,)
                 objects.append(obj)
-                S_SAFT_pmv_pexp.append(obj.S_sc)
+                S_SAFT_pmv_pexp.append(obj.S_sc_EOS)
             _df[f'S_SAFT_pmv{k}[g/g]'] = S_SAFT_pmv_pexp            
             
             # Calculates sorption from SAFT predictions only
@@ -96,7 +96,7 @@ def plot_isotherm_pmv(base_obj, T_list:list[float], export_data:bool = False, di
                     x0_list = S.update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
                     obj = S.DetailedSolPol(base_obj, T, _p, pmv_method=k, x0_sol_range = x0_list,)
                 objects.append(obj)
-                S_SAFT_pmv[k].append(obj.S_sc)
+                S_SAFT_pmv[k].append(obj.S_sc_EOS)
         
         df = pd.concat([df, _df], ignore_index=True)
         

@@ -77,7 +77,7 @@ def plot_eps_pmv(T: float, export_data:bool=False, display_fig:bool=True, save_f
             solubility_exp_NotCorrected = solubility_exp_NotCorrected.values
             # Calculate solubility prediction from SAFT
             try:
-                _S_SAFT = obj.S_sc
+                _S_SAFT = obj.S_sc_EOS
             except:
                 _S_SAFT = None
             
@@ -135,7 +135,7 @@ def plot_eps_pmv(T: float, export_data:bool=False, display_fig:bool=True, save_f
                 x0_list = S.update_x0_sol_list(previous_x0_sol=objects[j-1].x_am[0])
                 obj = S.DetailedSolPol(mix, T, _p, x0_sol_range = x0_list, pmv_method=pmv)
             objects.append(obj)
-            S_SAFT[pmv].append(obj.S_sc)
+            S_SAFT[pmv].append(obj.S_sc_EOS)
             
     # Plot data
     fig = plt.figure()
