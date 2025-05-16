@@ -815,7 +815,7 @@ class DetailedSolPol(BaseSolPol):
     
         
 class SolPolExpData():
-    def __init__(self, sol: str, pol: str, data_file="data_CO2-HDPE.xlsx"):
+    def __init__(self, sol: str, pol: str, data_file="../data/data_CO2-HDPE.xlsx"):
         self.sol = sol
         self.pol = pol
         # mixture = SolPolMixture(sol, pol)
