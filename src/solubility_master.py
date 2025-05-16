@@ -305,7 +305,7 @@ class DetailedSolPol(BaseSolPol):
                 solution = fsolve(equation, **solver_kwargs)
                 diff_LHS_RHS = equation(solution[0])
                 if debug:
-                    print('LHS-RHS = ', diff_LHS_RHS)
+                    print(f'\tLHS-RHS = {diff_LHS_RHS} (tol={solver_xtol}) for SwellingRatio = {solution[0]}')
 
                 # Create pressure-dependent tolerance
                 if self.P < 80e5:   
@@ -317,7 +317,7 @@ class DetailedSolPol(BaseSolPol):
                 if isclose([0], [diff_LHS_RHS], atol=atol):
                     solutions.append(solution[0])
                     if debug:
-                        print(f"Solution found: SwellingRatio = {solution[0]}")
+                        print(f"\tSolution found: SwellingRatio = {solution[0]}")
             except:
                 if debug:
                     print(f"Initial guess {x0} failed.")

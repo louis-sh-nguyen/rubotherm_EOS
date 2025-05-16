@@ -224,12 +224,13 @@ if __name__ == '__main__':
     #* Find solutions
     get_solubility_solutions(base_obj,x0=linspace(0, 0.2, 5),
                                     #  T=35+273,  p_selected_list=[20139060],    # 35 °C
-                                     T=50+273, p_selected_list=[10103760],    # 50 °C 10 MPa
-                                    #  T=50+273, p_selected_list=[200.8766*1e5],    # 50 °C 200 MPa
+                                    #  T=50+273, p_selected_list=[10103760],    # 50 °C 10 MPa
+                                     T=50+273, p_selected_list=[200.8766*1e5],    # 50 °C 200 MPa
                                      display_plot=True, 
                                     #  save_plot_dir=f'{result_folder_dir}\\{base_obj.sol}_{base_obj.pol}_{35}C_{time_ID}.png'
                                      )
     
+    # TODO why LHS-RHS so large for 50 C, 20 MPa?
     # rho_type = 'rhoSAFT'
     # for T in [25+273, 35+273, 50+273]:
     #     get_solubility_solutions(base_obj, T, display_plot=False,
