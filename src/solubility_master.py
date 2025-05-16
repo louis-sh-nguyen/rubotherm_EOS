@@ -301,17 +301,24 @@ class DetailedSolPol(BaseSolPol):
                 print(f"Initial guess: {x0}")
             try:
                 # Solve with fsolve
+                # solver_kwargs = {
+                #     'xtol': solver_xtol,  # Tighter tolerance (e.g., 1e-12 instead of 1e-10)
+                #     'maxfev': 1000,       # Increase max function evaluations (default is 100*N)
+                #     'factor': 0.1,        # Adjust finite difference step size (default is 100)
+                #     'full_output': True   # Get detailed output about convergence
+                # }
                 solver_kwargs = {'xtol': solver_xtol, 'x0': x0}
                 solution = fsolve(equation, **solver_kwargs)
                 diff_LHS_RHS = equation(solution[0])
-                if debug:
-                    print(f'\tLHS-RHS = {diff_LHS_RHS} (tol={solver_xtol}) for SwellingRatio = {solution[0]}')
 
                 # Create pressure-dependent tolerance
                 if self.P < 80e5:   
                     atol = 1e-4 
                 else:
                     atol = 1e-3 # allow larger tolerance for high pressure
+                
+                if debug:
+                    print(f'\tLHS-RHS = {diff_LHS_RHS} (tol={atol}) for SwellingRatio = {solution[0]}')
                 
                 # Check LHS-RHS is close to zero
                 if isclose([0], [diff_LHS_RHS], atol=atol):
