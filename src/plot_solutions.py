@@ -214,12 +214,13 @@ if __name__ == '__main__':
     base_obj = S.BaseSolPol('CO2', 'HDPE')
     
     #* Find solutions
-    # get_solubility_solutions(base_obj,
-    #                                 #  T=35+273,  p_selected_list=[20139060],    # 35 °C
-    #                                  T=50+273, p_selected_list=[10103760],    # 50 °C
-    #                                  display_plot=True, 
-    #                                 #  save_plot_dir=f'{result_folder_dir}\\{base_obj.sol}_{base_obj.pol}_{35}C_{time_ID}.png'
-    #                                  )
+    get_solubility_solutions(base_obj,
+                                    #  T=35+273,  p_selected_list=[20139060],    # 35 °C
+                                     T=50+273, p_selected_list=[10103760],    # 50 °C 10 MPa
+                                    #  T=50+273, p_selected_list=[200.8766*1e5],    # 50 °C 200 MPa
+                                     display_plot=True, 
+                                    #  save_plot_dir=f'{result_folder_dir}\\{base_obj.sol}_{base_obj.pol}_{35}C_{time_ID}.png'
+                                     )
     
     # rho_type = 'rhoSAFT'
     # for T in [25+273, 35+273, 50+273]:
@@ -229,7 +230,7 @@ if __name__ == '__main__':
     
     #* Root evaluation
     # plot_solubility_solutions_rootEvaluation(base_obj, 35+273, 20139060, 'SwR')
-    plot_solubility_solutions_rootEvaluation(base_obj, 50+273, 20087660, 'Ssc')
+    # plot_solubility_solutions_rootEvaluation(base_obj, 50+273, 20087660, 'Ssc')
     
     #* Find omega_cr
     # for T in [25+273, 35+273, 50+273]:
