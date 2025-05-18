@@ -20,7 +20,14 @@ def plot_solubility_solutions_rootEvaluation(base_obj, T: float, p: float, var: 
     elif var == 'Ssc':
         obj.solve_solubility_plot_Ssc() 
 
-def get_solubility_solutions(base_obj, T, p_selected_list = None, display_plot=True, save_plot_dir=None, export_csv_dir=None):
+def get_solubility_solutions(base_obj: S.BaseSolPol, 
+                                T: float, 
+                                x0: list = linspace(0, 0.1, 10),
+                                solver_xtol: float = 1e-10,
+                                p_selected_list: list = None, 
+                                display_plot: bool = True, 
+                                save_plot_dir: str = None, 
+                                export_csv_dir: str = None):
     data = S.SolPolExpData(base_obj.sol, base_obj.pol)    
     _df = {}
     _df=data.get_sorption_data(T)
@@ -29,16 +36,18 @@ def get_solubility_solutions(base_obj, T, p_selected_list = None, display_plot=T
         # Use all pressure values
         pressures = _df["P[bar]"] * 1e5 # [Pa]
         
-    elif p_selected_list != None:        
+    else:
+        # Select specific pressure values
         masks = []
         for p in p_selected_list:
-            mask = abs(_df["P[bar]"]*1e5 - p) <= (p*0.01)
+            mask = abs(_df["P[bar]"]*1e5 - p) <= (p*0.01)   # allow for 1% error
             masks.append(mask)
             
         # Combine all masks
         masks_combined = logical_or.reduce(masks)
         pressures = _df[masks_combined]["P[bar]"] * 1e5 
     
+    # Store the results
     pressure_values = []
     S_sc_exp_values = []
     SwellingRatio_values = []
@@ -48,11 +57,11 @@ def get_solubility_solutions(base_obj, T, p_selected_list = None, display_plot=T
         obj = S.DetailedSolPol(base_obj, T, p)
         
         try:
-            SwR, S_sc = obj.solve_solubility()
+            SwR, S_sc = obj.solve_solubility(rhoCO2_type='SW', x0_list=x0, solver_xtol=solver_xtol, debug=True)
         except:
             SwR, S_sc = [None], [None]
-        
-        
+
+        # Add results to lists
         S_sc_exp_values.extend(S_sc)
         SwellingRatio_values.extend(SwR)
         pressure_values.extend([p]*len(S_sc))
@@ -64,7 +73,7 @@ def get_solubility_solutions(base_obj, T, p_selected_list = None, display_plot=T
     print('SwellingRatio_values:', *SwellingRatio_values)
     print('')
     
-    def get_properties(T, p, S_sc):
+    def get_properties(T: float, p: float, S_sc: float):
 
         obj = S.DetailedSolPol(base_obj, T, p)
         
@@ -82,8 +91,7 @@ def get_solubility_solutions(base_obj, T, p_selected_list = None, display_plot=T
         x = hstack([x_s, x_p])   # [mol/mol]
         
         # Calculate Vs and Vp
-        V_s, V_p =  obj.Vs_Vp_pmv1(obj.T, obj.P, S_am)  #* Default
-        # V_s, V_p =  obj.Vs_Vp_pmv2()    #* TEST
+        V_s, V_p =  obj.Vs_Vp_pmv1(obj.T, obj.P, S_am)
         
         # Calculate mixture Density
         rho_t = obj.rho_tot(T, p, S_sc)   # [mol/m^3]        
@@ -214,9 +222,10 @@ if __name__ == '__main__':
     base_obj = S.BaseSolPol('CO2', 'HDPE')
     
     #* Find solutions
-    # get_solubility_solutions(base_obj,
+    # get_solubility_solutions(base_obj,x0=linspace(0, 0.2, 5), solver_xtol=1e-12,
     #                                 #  T=35+273,  p_selected_list=[20139060],    # 35 °C
-    #                                  T=50+273, p_selected_list=[10103760],    # 50 °C
+    #                                 #  T=50+273, p_selected_list=[10103760],    # 50 °C 10 MPa
+    #                                  T=50+273, p_selected_list=[200.8766*1e5],    # 50 °C 200 MPa
     #                                  display_plot=True, 
     #                                 #  save_plot_dir=f'{result_folder_dir}\\{base_obj.sol}_{base_obj.pol}_{35}C_{time_ID}.png'
     #                                  )
@@ -231,6 +240,9 @@ if __name__ == '__main__':
     # plot_solubility_solutions_rootEvaluation(base_obj, 35+273, 20139060, 'SwR')
     plot_solubility_solutions_rootEvaluation(base_obj, 50+273, 20087660, 'Ssc')
     
+    #! High pressure no solution diagnostic:
+    # 1) exessive polymer compressibility (Vp too small at high pressure)
+    # 2) crystallinity independent of pressure (omega_cr should increase with pressure)
     #* Find omega_cr
     # for T in [25+273, 35+273, 50+273]:
     #     omega_cr = S.find_omega_cr(base_obj, T)

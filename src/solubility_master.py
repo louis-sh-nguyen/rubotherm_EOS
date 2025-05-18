@@ -203,7 +203,16 @@ class DetailedSolPol(BaseSolPol):
             self._rho_pol_cr = self.get_rho_pol_cr(self.T)
         return self._rho_pol_cr
 
-    def solve_solubility(self, rhoCO2_data: str = 'SW', x0_list=linspace(0, 0.3, 6)): # numerical solving
+    def solve_solubility(
+        self, rhoCO2_type: str = 'SW', x0_list=linspace(0, 0.3, 6),
+        solver_xtol: float = 1.0e-10, unique_solution_rtol: float = 5e-2, solution_filter: bool = True, debug: bool = False,
+        ): # numerical solving
+        
+        # Check rhoCO2_data_type is valid
+        allowed_rhoCO2_data_types = ['EXP', 'SW', 'SAFT']
+        if rhoCO2_type not in allowed_rhoCO2_data_types:
+            raise ValueError(f"Invalid rhoCO2_data_type: {rhoCO2_type}. Allowed values are: {allowed_rhoCO2_data_types}")
+        
         # Import data object
         data = SolPolExpData(self.sol, self.pol)
         
@@ -220,18 +229,17 @@ class DetailedSolPol(BaseSolPol):
         try:
             m_net_exp = _df[mask]["MP1*[g]"].values[0] - data.m_met_filled
             
-            if rhoCO2_data == 'EXP':
+            if rhoCO2_type == 'EXP':
                 # Use EXP values of rho_f
                 rho_f = _df[mask]["ρ[g/cc]"].values[0]
-            elif rhoCO2_data == 'SW':
+            if rhoCO2_type == 'SW':
                 # Use Span Wagner EoS values of rho_f
                 rho_f = _df[mask]["ρSW[g/cc]"].values[0]
-            elif rhoCO2_data == 'SAFT':
+            if rhoCO2_type == 'SAFT':
                 # Use SAFT EoS values of rho_f
                 rho_f = _df[mask]["ρSAFT[g/cc]"].values[0]
-                
-            print('rhoCO2 data use: ', rhoCO2_data)
-            
+            print('rhoCO2 data use: ', rhoCO2_type)
+            print('rho_f: ', rho_f)
             V_b_exp = data.Vbasket
             V_t0_exp = data.Vs
             m_ptot_exp = data.ms
@@ -244,19 +252,16 @@ class DetailedSolPol(BaseSolPol):
         # Get omega_cr
         omega_cr = self.omega_cr
         print(f'omega_cr: {omega_cr}')
-                
+        
         # Get rho_pol_cr
         rho_p_c = self.rho_pol_cr  # [g/m^3]
-        print(f'rho_p_cr = {rho_p_c} g/m^3')
+        if debug:
+            print(f'rho_p_cr = {rho_p_c} g/m^3')
         
         def S_sc_exp(SwR):
             # Calculate V_t0_exp based on calculated rho_tot(T,0,0)
             rhoT00 = self.rho_tot(self.T, 1, 0)*1e-6  # [g/cm^3]
             V_t0_model = m_ptot_exp/rhoT00  # [cm^3]
-            
-            # Compare rhoT00 and V_t0_exp
-            # print(f'V_t0_exp = {V_t0_exp} cm^3')
-            # print(f'V_t0_model = {V_t0_model} cm^3')
             
             #* Choose V_t0 values
             # V_t0 = V_t0_exp  # [cm^3], exp value
@@ -285,56 +290,89 @@ class DetailedSolPol(BaseSolPol):
         
         
         # *Initial guesses
-        initial_guesses = x0_list        
-        print("Initial guesses:", *initial_guesses)
+        initial_guesses = x0_list 
+        if debug:       
+            print("Initial guesses:", *initial_guesses)
         
         solutions = []
 
         for x0 in initial_guesses:
-            print(f"Initial guess: {x0}")
+            if debug:
+                print(f"Initial guess: {x0}")
             try:
-                solution = fsolve(equation, x0, xtol=1.0e-10)
-                print('equation(solution[0]):', equation(solution[0]))
-                if isclose([0], [equation(solution[0])], atol=1e-4 if self.P < 80e5 else 1e-3):
+                # Solve with fsolve
+                # solver_kwargs = {
+                #     'xtol': solver_xtol,  # Tighter tolerance (e.g., 1e-12 instead of 1e-10)
+                #     'maxfev': 1000,       # Increase max function evaluations (default is 100*N)
+                #     'factor': 0.1,        # Adjust finite difference step size (default is 100)
+                #     'full_output': True   # Get detailed output about convergence
+                # }
+                solver_kwargs = {'xtol': solver_xtol, 'x0': x0}
+                solution = fsolve(equation, **solver_kwargs)
+                diff_LHS_RHS = equation(solution[0])
+
+                # Create pressure-dependent tolerance
+                if self.P < 80e5:   
+                    atol = 1e-4 
+                else:
+                    atol = 1e-3 # allow larger tolerance for high pressure
+                
+                if debug:
+                    print(f'\tLHS-RHS = {diff_LHS_RHS} (tol={atol}) for SwellingRatio = {solution[0]}')
+                
+                # Check LHS-RHS is close to zero
+                if isclose([0], [diff_LHS_RHS], atol=atol):
                     solutions.append(solution[0])
-                    print(f"SwellingRatio = {solution[0]}")
+                    if debug:
+                        print(f"\tSolution found: SwellingRatio = {solution[0]}")
             except:
-                print(f"Initial guess {x0} failed.")
+                if debug:
+                    print(f"Initial guess {x0} failed.")
                 continue
             
         # Create a new matrix of unique solutions
         unique_solutions = []
 
         for solution in solutions:
-            # Only accept non-zero solution, accounting for negative values approaching zero at very low pressures (p < 10 Pa)
-            if (self.P < 10 and solution > -1e-4) or (self.P >= 10 and solution > 0):
-                
+            # Filter if solution enabled
+            if solution_filter:
+                # Only accept non-zero solution, accounting for negative values approaching zero at very low pressures (p < 10 Pa)
+                valid_solution = (self.P < 10 and solution > -1e-4) or (self.P >= 10 and solution > 0)
+            else:
+                valid_solution = True
+            
+            if valid_solution:
                 # Initialisation: if unique_solutions is empty, add the first solution
                 if not unique_solutions:
                     unique_solutions.append(solution)
                     
                 else:
                     # Check if the solution is already in the unique_solutions list
-                    if not any([isclose(solution, unique_solution, rtol=5e-2) for unique_solution in unique_solutions]):
+                    if not any([isclose(solution, unique_solution, rtol=unique_solution_rtol) for unique_solution in unique_solutions]):
                         unique_solutions.append(solution)
-                        print('Solution appended:', solution)
+                        if debug:
+                            print('Solution appended:', solution)
 
         # Print unique solutions
-        print('Unique solutions: ', *unique_solutions)
-        
+        if debug:
+            print('Unique solutions: ', *unique_solutions)
+
         # Extract S_sc_exp and SwellingRatio from solutions
         SwellingRatio_values = [solution for solution in unique_solutions]
         S_sc_exp_values = [S_sc_exp(SwR) for SwR in SwellingRatio_values]
-        print('')
-        print('SwellingRatio:', SwellingRatio_values)
-        print('S_sc:', S_sc_exp_values)
-        
+        if debug:
+            print('SwellingRatio:', SwellingRatio_values)
+            print('S_sc:', S_sc_exp_values)
+
         if len(unique_solutions) == 1:
-            print('Single solution found.')
+            if debug:
+                print('Single solution found.')
         elif len(unique_solutions) > 1:
-            print('Multiple solutions found.')
+            if debug:
+                print('Multiple solutions found.')
         elif len(unique_solutions) == 0:
-            print('No solution found.')
+            if debug:
+                print('No solution found.')
             SwellingRatio_values, S_sc_exp_values = [None], [None]
         
         return SwellingRatio_values, S_sc_exp_values
@@ -815,7 +853,7 @@ class DetailedSolPol(BaseSolPol):
     
         
 class SolPolExpData():
-    def __init__(self, sol: str, pol: str, data_file="data_CO2-HDPE.xlsx"):
+    def __init__(self, sol: str, pol: str, data_file="../data/data_CO2-HDPE.xlsx"):
         self.sol = sol
         self.pol = pol
         # mixture = SolPolMixture(sol, pol)
