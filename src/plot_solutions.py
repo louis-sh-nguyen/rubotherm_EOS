@@ -240,9 +240,11 @@ if __name__ == '__main__':
     # plot_solubility_solutions_rootEvaluation(base_obj, 35+273, 20139060, 'SwR')
     plot_solubility_solutions_rootEvaluation(base_obj, 50+273, 20087660, 'Ssc')
     
-    #! High pressure no solution diagnostic:
-    # 1) exessive polymer compressibility (Vp too small at high pressure)
+    ## NOTE High pressure no solution diagnostic:
+    # 1) excessive polymer compressibility (Vp too small at high pressure)
     # 2) crystallinity independent of pressure (omega_cr should increase with pressure)
+    
+    
     #* Find omega_cr
     # for T in [25+273, 35+273, 50+273]:
     #     omega_cr = S.find_omega_cr(base_obj, T)
