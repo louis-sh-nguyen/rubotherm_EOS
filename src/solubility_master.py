@@ -227,7 +227,8 @@ class DetailedSolPol(BaseSolPol):
         mask = abs(_df["P[bar]"]*1e5 - self.P) <= (self.P*0.01)
         
         try:
-            m_net_exp = _df[mask]["MP1*[g]"].values[0] - data.m_met_filled
+            # Get raw mass
+            m_raw = _df[mask]["MP1*[g]"].values[0] - data.m_met_filled
             
             if rhoCO2_type == 'EXP':
                 # Use EXP values of rho_f
@@ -268,7 +269,7 @@ class DetailedSolPol(BaseSolPol):
             V_t0 = V_t0_model  # [cm^3], calculated value
             
             # Calculate S_sc_exp
-            S_sc_exp = (m_net_exp + rho_f * (V_b_exp + V_t0 * (1 + SwR))) / m_ptot_exp
+            S_sc_exp = (m_raw + rho_f * (V_b_exp + V_t0 * (1 + SwR))) / m_ptot_exp
             
             return S_sc_exp
             
@@ -703,7 +704,7 @@ class DetailedSolPol(BaseSolPol):
         
         return dV_dns/self.MW_sol   # [m^3/g]
 
-    def V_pol(self, x: array, T: float, P:float, eps:float = 1.0e-10):
+    def V_pol(self, x: array, T: float, P:float, eps:float = 1.0e-8):
         """Function to calculate partial volume of polymer in mixture. 
         Assuming constant in condensed phase.
         Unit = [m3/g].
@@ -732,7 +733,7 @@ class DetailedSolPol(BaseSolPol):
         return dV_dnp / self.MW_pol # [m^3/g]
     
 
-    def Vs_Vp_pmv1(self, T: float, P: float, S_a: float):
+    def Vs_Vp_pmv1(self, T: float, P: float, S_a: float, pressure_limit: bool = False):
         """Function to calculate partial volume of solute in mixture, using pmv method 1.
         pmv method 1: using solubility composition.
         Unit = [m3/g]
@@ -746,8 +747,25 @@ class DetailedSolPol(BaseSolPol):
         x = hstack([x_s, x_p])   # [mol/mol]        
         V_s = self.V_sol(x, T, P)  # [m^3/g]        
         V_p = self.V_pol(x, T, P)  # [m^3/g]
+        
+        if pressure_limit:
+            # Add pressure limiting for polymer compressibility
+            if P > 1e5:  # Only apply correction above atmospheric pressure
+                # Get reference values at atmospheric pressure
+                V_p_atm = self.V_pol(hstack([S_a/(S_a+1), 1/(S_a+1)]), T, 1e5)
+                
+                # Apply Tait equation for polymer compression (widely used for polymers)
+                B = 350e6  # Characteristic pressure for HDPE [Pa]
+                C = 0.09   # Dimensionless constant for polyethylene
+                
+                # Calculate compression limit based on Tait equation
+                compression_limit = V_p_atm * (1 - C * log(1 + P/B))
+                
+                # Apply limit (use maximum value to prevent excessive compression)
+                V_p = max(V_p, compression_limit)
+
         return V_s, V_p
-    
+
     def Vs_Vp_pmv2(self):
         """Function to calculate partial volume of solute in mixture, using pmv method 2.
         pmv method 2: assuming Vs and Vp same as specific volume at __infinitely dilution__.
