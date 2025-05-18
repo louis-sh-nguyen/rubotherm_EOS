@@ -203,11 +203,44 @@ class DetailedSolPol(BaseSolPol):
             self._rho_pol_cr = self.get_rho_pol_cr(self.T)
         return self._rho_pol_cr
 
+    def S_sc_exp(self, SwR, m_raw, rho_f, V_b_exp, V_t0_exp, m_ptot_exp):
+        # Calculate V_t0_exp based on calculated rho_tot(T,0,0)
+        rhoT00 = self.rho_tot(self.T, 1, 0)*1e-6  # [g/cm^3]
+        V_t0_model = m_ptot_exp/rhoT00  # [cm^3]
+        
+        #* Choose V_t0 values
+        # V_t0 = V_t0_exp  # [cm^3], exp value
+        V_t0 = V_t0_model  # [cm^3], calculated value
+        
+        # Calculate S_sc_exp
+        S_sc_exp = (m_raw + rho_f * (V_b_exp + V_t0 * (1 + SwR))) / m_ptot_exp
+
+        return S_sc_exp
+
+    def residual_equation(self, SwellingRatio, m_raw, rho_f, V_b_exp, V_t0_exp, m_ptot_exp):
+        """Calculate the residual of the swelling ratio equation.
+        Returns: float - Difference between LHS and RHS of equation
+        """
+        # Calculate S_sc_exp
+        S_sc = self.S_sc_exp(SwellingRatio, m_raw, rho_f, V_b_exp, V_t0_exp, m_ptot_exp)
+        
+        # Calculate rho_tot(T,0,0)
+        rhoT00 = self.rho_tot(self.T, 1, 0)  # [g/m^3], use P = 1 Pa
+        
+        # Calculate rho_tot(T,P,S)
+        rhoTPS = self.rho_tot(self.T, self.P, S_sc)  # [g/m^3]
+        
+        # Define the equations in terms of these variables and instance variables
+        LHS = SwellingRatio
+        RHS = (rhoT00 / rhoTPS) * (1 + S_sc) - 1
+
+        return LHS-RHS    # Solve for LHS-RHS = 0
+    
     def solve_solubility(
         self, rhoCO2_type: str = 'SW', x0_list=linspace(0, 0.3, 6),
         solver_xtol: float = 1.0e-10, unique_solution_rtol: float = 5e-2, solution_filter: bool = True, debug: bool = False,
-        ): # numerical solving
-        
+    ):  # numerical solving
+
         # Check rhoCO2_data_type is valid
         allowed_rhoCO2_data_types = ['EXP', 'SW', 'SAFT']
         if rhoCO2_type not in allowed_rhoCO2_data_types:
@@ -259,37 +292,40 @@ class DetailedSolPol(BaseSolPol):
         if debug:
             print(f'rho_p_cr = {rho_p_c} g/m^3')
         
-        def S_sc_exp(SwR):
-            # Calculate V_t0_exp based on calculated rho_tot(T,0,0)
-            rhoT00 = self.rho_tot(self.T, 1, 0)*1e-6  # [g/cm^3]
-            V_t0_model = m_ptot_exp/rhoT00  # [cm^3]
+        # def S_sc_exp(SwR):
+        #     # Calculate V_t0_exp based on calculated rho_tot(T,0,0)
+        #     rhoT00 = self.rho_tot(self.T, 1, 0)*1e-6  # [g/cm^3]
+        #     V_t0_model = m_ptot_exp/rhoT00  # [cm^3]
             
-            #* Choose V_t0 values
-            # V_t0 = V_t0_exp  # [cm^3], exp value
-            V_t0 = V_t0_model  # [cm^3], calculated value
+        #     #* Choose V_t0 values
+        #     # V_t0 = V_t0_exp  # [cm^3], exp value
+        #     V_t0 = V_t0_model  # [cm^3], calculated value
             
-            # Calculate S_sc_exp
-            S_sc_exp = (m_raw + rho_f * (V_b_exp + V_t0 * (1 + SwR))) / m_ptot_exp
+        #     # Calculate S_sc_exp
+        #     S_sc_exp = (m_raw + rho_f * (V_b_exp + V_t0 * (1 + SwR))) / m_ptot_exp
             
-            return S_sc_exp
+        #     return S_sc_exp
             
-        def equation(SwellingRatio):
-            # Calculate S_sc_exp
-            S_sc = S_sc_exp(SwellingRatio)
+        # def obj(SwellingRatio):
+        #     # Calculate S_sc_exp
+        #     S_sc = self.S_sc_exp(SwellingRatio, m_raw, rho_f, V_b_exp, V_t0_exp, m_ptot_exp)
             
-            # Calculate rho_tot(T,0,0)
-            rhoT00 = self.rho_tot(self.T, 1, 0)  # [g/m^3], use P = 1 Pa
+        #     # Calculate rho_tot(T,0,0)
+        #     rhoT00 = self.rho_tot(self.T, 1, 0)  # [g/m^3], use P = 1 Pa
             
-            # Calculate rho_tot(T,P,S)
-            rhoTPS = self.rho_tot(self.T, self.P, S_sc)  # [g/m^3]
+        #     # Calculate rho_tot(T,P,S)
+        #     rhoTPS = self.rho_tot(self.T, self.P, S_sc)  # [g/m^3]
             
-            # Define the equations in terms of these variables and instance variables
-            LHS = SwellingRatio
-            RHS = (rhoT00 / rhoTPS) * (1 + S_sc) - 1
+        #     # Define the equations in terms of these variables and instance variables
+        #     LHS = SwellingRatio
+        #     RHS = (rhoT00 / rhoTPS) * (1 + S_sc) - 1
             
-            return LHS-RHS    # Solve for LHS-RHS = 0
+        #     return LHS-RHS    # Solve for LHS-RHS = 0
         
-        
+        # Inside solve_solubility
+        def obj_wrapper(SwR):
+            return self.residual_equation(SwR, m_raw, rho_f, V_b_exp, V_t0_exp, m_ptot_exp)
+
         # *Initial guesses
         initial_guesses = x0_list 
         if debug:       
@@ -309,8 +345,8 @@ class DetailedSolPol(BaseSolPol):
                 #     'full_output': True   # Get detailed output about convergence
                 # }
                 solver_kwargs = {'xtol': solver_xtol, 'x0': x0}
-                solution = fsolve(equation, **solver_kwargs)
-                diff_LHS_RHS = equation(solution[0])
+                solution = fsolve(obj_wrapper, **solver_kwargs)
+                diff_LHS_RHS = obj_wrapper(solution[0])
 
                 # Create pressure-dependent tolerance
                 if self.P < 80e5:   
@@ -360,7 +396,7 @@ class DetailedSolPol(BaseSolPol):
 
         # Extract S_sc_exp and SwellingRatio from solutions
         SwellingRatio_values = [solution for solution in unique_solutions]
-        S_sc_exp_values = [S_sc_exp(SwR) for SwR in SwellingRatio_values]
+        S_sc_exp_values = [self.S_sc_exp(SwR, m_raw, rho_f, V_b_exp, V_t0_exp, m_ptot_exp) for SwR in SwellingRatio_values]
         if debug:
             print('SwellingRatio:', SwellingRatio_values)
             print('S_sc:', S_sc_exp_values)
