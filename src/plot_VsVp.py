@@ -187,7 +187,8 @@ def plot_polymer_compressibility(base_obj, T=323.15):
     widom_T_P = {35+273: 80.4e5, 
                  50+273: 103e5}  
         
-    P_values = logspace(0, 8.5, 30)  # 1 Pa to 300 MPa
+    # P_values = logspace(0, 8.5, 30)  # 1 Pa to 300 MPa
+    P_values = linspace(0, 500e5, 50)  # 1 Pa to 300 MPa
     obj = S.DetailedSolPol(base_obj, T, 1e5)
 
     # Calculate V_p using different methods
@@ -196,21 +197,35 @@ def plot_polymer_compressibility(base_obj, T=323.15):
     
     for P in P_values:
         # SAFT calculation (unbounded)
-        x = hstack([0.001, 0.999])  # Almost pure polymer
+        x = hstack([0.000000001, 1-0.000000001])  # Almost pure polymer
         V_p_s = obj.V_pol(x, T, P)
         V_p_saft.append(V_p_s*1e6)  # Convert to cm³/g
         
         # Tait equation reference
-        V_p_ref = obj.V_pol(x, T, 1e5)  # At reference pressure
-        B = 350e6  # Characteristic pressure [Pa]
-        C = 0.09   # Tait constant
-        V_p_t = V_p_ref * (1 - C * log(1 + P/B))  # Tait equation
-        V_p_tait.append(V_p_t*1e6)  # Convert to cm³/g
+        # Get reference specific volume at P=1 bar
+        P_ref = 1e5  # Reference pressure [Pa]
+        V_p_ref = obj.V_pol(x, T, P_ref)  # At reference pressure [m³/g]
+        
+        # Apply Tait equation with constant parameters on the reference volume
+        # B = 350e6  # Characteristic pressure [Pa]
+        # C = 0.0849   # Tait constant
+        # V_p_t = V_p_ref * (1 - C * log(1 + P/B))  # Tait equation
+        # V_p_tait.append(V_p_t*1e6)  # Convert to cm³/g
+        
+        # Apply Tait equation with temperature dependence on the reference volume
+        # Capt & Kamal, Int. Polym. Process. 15 (1) 83-94 (2000)        
+        C = 0.0849   # Tait constant
+        b1=235.0e6  # Characteristic pressure [Pa]
+        b2=2.1e-3
+        B_T = b1 * exp(-b2 * T) # [Pa]
+        log_term = log((B_T + P) / (B_T + P_ref))
+        V_p_t = V_p_ref * (1 - C * log_term)  # [m³/g]
+        V_p_tait.append(V_p_t*1e6)  # [cm³/g]
     
     # Plot
     plt.figure(figsize=(6, 4))
-    plt.semilogx(P_values/1e5, V_p_saft, 'r-', label='SAFT-γ Mie')
-    plt.semilogx(P_values/1e5, V_p_tait, 'b--', label='Tait Equation')
+    plt.plot(P_values/1e5, V_p_saft, 'r-', label='SAFT-γ Mie')
+    plt.plot(P_values/1e5, V_p_tait, 'b--', label='Tait Equation')
     
     # Update Widom line values
     if T in widom_T_P.keys():
@@ -267,6 +282,40 @@ def plot_density_ratio(base_obj, T=323.15):
     plt.ylabel('ρ(T,0,0)/ρ(T,P,0)')
     plt.legend()
     plt.show()
+    
+
+def tait_specific_volume(T, P, 
+                         a0=0.882, 
+                         a1=6.51e-4, 
+                         a2=0.0, 
+                         b1=235.0, 
+                         b2=2.1e-3, 
+                         C=0.0894, 
+                         P_ref=0.1013):
+    """
+    Calculate specific volume v(T,P) using the Tait equation for amorphous polyethylene.
+    
+    Parameters:
+    - T : float or array-like, temperature in Kelvin
+    - P : float or array-like, pressure in MPa
+    - a0, a1, a2 : coefficients for temperature dependence of v0(T)
+    - b1, b2     : coefficients for pressure dependence B(T)
+    - C          : universal constant in Tait equation (dimensionless)
+    - P_ref      : reference pressure in MPa (default 0.1013 MPa = 1 atm)
+    
+    Returns:
+    - v : specific volume in cm³/g
+    """
+    T = asarray(T)
+    P = asarray(P)
+
+    v0 = a0 + a1 * T + a2 * T**2
+    B_T = b1 * exp(-b2 * T)
+    
+    log_term = log((B_T + P) / (B_T + P_ref))
+    v = v0 * (1 - C * log_term)
+    return v
+
 if __name__ == "__main__":
     mix = S.BaseSolPol("CO2","HDPE")
     for T in array([25, 35, 50]) + 273:
@@ -274,10 +323,10 @@ if __name__ == "__main__":
         # plot_VsVp_pmv(mix, T, display_fig=False, save_fig=True)
         
         # Compare compressibility between SAFT and Tait
-        # plot_polymer_compressibility(mix, T)
+        plot_polymer_compressibility(mix, T)
         
         # Plot polymer density ratio vs pressure
-        plot_density_ratio(mix, T)
+        # plot_density_ratio(mix, T)
 
     #* Test Vs and Vp vs. S_am at different pressures
     # plot_VsVp_vs_Sam_multiP(mix, T=35+273, p_list=linspace(1e6, 15e6, 10))
