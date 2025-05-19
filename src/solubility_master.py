@@ -239,7 +239,7 @@ class DetailedSolPol(BaseSolPol):
     def solve_solubility(
         self, rhoCO2_type: str = 'SW', x0_list=linspace(0, 0.3, 6),
         solver_xtol: float = 1.0e-10, unique_solution_rtol: float = 5e-2, solution_filter: bool = True, debug: bool = False,
-    ):  # numerical solving
+        ):  # numerical solving
 
         # Check rhoCO2_data_type is valid
         allowed_rhoCO2_data_types = ['EXP', 'SW', 'SAFT']
@@ -291,36 +291,6 @@ class DetailedSolPol(BaseSolPol):
         rho_p_c = self.rho_pol_cr  # [g/m^3]
         if debug:
             print(f'rho_p_cr = {rho_p_c} g/m^3')
-        
-        # def S_sc_exp(SwR):
-        #     # Calculate V_t0_exp based on calculated rho_tot(T,0,0)
-        #     rhoT00 = self.rho_tot(self.T, 1, 0)*1e-6  # [g/cm^3]
-        #     V_t0_model = m_ptot_exp/rhoT00  # [cm^3]
-            
-        #     #* Choose V_t0 values
-        #     # V_t0 = V_t0_exp  # [cm^3], exp value
-        #     V_t0 = V_t0_model  # [cm^3], calculated value
-            
-        #     # Calculate S_sc_exp
-        #     S_sc_exp = (m_raw + rho_f * (V_b_exp + V_t0 * (1 + SwR))) / m_ptot_exp
-            
-        #     return S_sc_exp
-            
-        # def obj(SwellingRatio):
-        #     # Calculate S_sc_exp
-        #     S_sc = self.S_sc_exp(SwellingRatio, m_raw, rho_f, V_b_exp, V_t0_exp, m_ptot_exp)
-            
-        #     # Calculate rho_tot(T,0,0)
-        #     rhoT00 = self.rho_tot(self.T, 1, 0)  # [g/m^3], use P = 1 Pa
-            
-        #     # Calculate rho_tot(T,P,S)
-        #     rhoTPS = self.rho_tot(self.T, self.P, S_sc)  # [g/m^3]
-            
-        #     # Define the equations in terms of these variables and instance variables
-        #     LHS = SwellingRatio
-        #     RHS = (rhoT00 / rhoTPS) * (1 + S_sc) - 1
-            
-        #     return LHS-RHS    # Solve for LHS-RHS = 0
         
         # Inside solve_solubility
         def obj_wrapper(SwR):
@@ -740,7 +710,7 @@ class DetailedSolPol(BaseSolPol):
         
         return dV_dns/self.MW_sol   # [m^3/g]
 
-    def V_pol(self, x: array, T: float, P:float, eps:float = 1.0e-8):
+    def V_pol(self, x: array, T: float, P:float, eps:float = 1.0e-10):
         """Function to calculate partial volume of polymer in mixture. 
         Assuming constant in condensed phase.
         Unit = [m3/g].
@@ -791,11 +761,16 @@ class DetailedSolPol(BaseSolPol):
                 V_p_atm = self.V_pol(hstack([S_a/(S_a+1), 1/(S_a+1)]), T, 1e5)
                 
                 # Apply Tait equation for polymer compression (widely used for polymers)
-                B = 350e6  # Characteristic pressure for HDPE [Pa]
-                C = 0.09   # Dimensionless constant for polyethylene
-                
+                # Parameter ref: Capt & Kamal, Int. Polym. Process. 15 (1) 83-94 (2000) 
+                # B = 350e6  # Characteristic pressure for HDPE [Pa]
+                C = 0.0849   # Dimensionless constant for polyethylene
+                b1=235.0e6  # Characteristic pressure [Pa]
+                b2=2.1e-3
+                B_T = b1 * exp(-b2 * T) # [Pa]
+                log_term = log((B_T + P) / (B_T + 1e5))
+
                 # Calculate compression limit based on Tait equation
-                compression_limit = V_p_atm * (1 - C * log(1 + P/B))
+                compression_limit = V_p_atm * (1 - C * log_term)  # [m³/g]
                 
                 # Apply limit (use maximum value to prevent excessive compression)
                 V_p = max(V_p, compression_limit)
