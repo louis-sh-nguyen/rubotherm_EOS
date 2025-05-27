@@ -181,10 +181,153 @@ def plot_VsVp_vs_Sam_multiP(base_obj, T, p_list):
     plt.show()
 
 
+def plot_polymer_compressibility(base_obj, T=323.15):
+    """Plot polymer specific volume vs pressure using different methods. Assuming almost pure polymer"""
+    # CO₂ Widom line values (K, Pa)
+    widom_T_P = {35+273: 80.4e5, 
+                 50+273: 103e5}  
+        
+    # P_values = logspace(0, 8.5, 30)  # 1 Pa to 300 MPa
+    P_values = linspace(0, 500e5, 50)  # 1 Pa to 300 MPa
+    obj = S.DetailedSolPol(base_obj, T, 1e5)
+
+    # Calculate V_p using different methods
+    V_p_saft = []
+    V_p_tait = []
+    
+    for P in P_values:
+        # SAFT calculation (unbounded)
+        x = hstack([0.000000001, 1-0.000000001])  # Almost pure polymer
+        V_p_s = obj.V_pol(x, T, P)
+        V_p_saft.append(V_p_s*1e6)  # Convert to cm³/g
+        
+        # Tait equation reference
+        # Get reference specific volume at P=1 bar
+        P_ref = 1e5  # Reference pressure [Pa]
+        V_p_ref = obj.V_pol(x, T, P_ref)  # At reference pressure [m³/g]
+        
+        # Apply Tait equation with constant parameters on the reference volume
+        # B = 350e6  # Characteristic pressure [Pa]
+        # C = 0.0849   # Tait constant
+        # V_p_t = V_p_ref * (1 - C * log(1 + P/B))  # Tait equation
+        # V_p_tait.append(V_p_t*1e6)  # Convert to cm³/g
+        
+        # Apply Tait equation with temperature dependence on the reference volume
+        # Capt & Kamal, Int. Polym. Process. 15 (1) 83-94 (2000)        
+        C = 0.0849   # Tait constant
+        b1=235.0e6  # Characteristic pressure [Pa]
+        b2=2.1e-3
+        B_T = b1 * exp(-b2 * T) # [Pa]
+        log_term = log((B_T + P) / (B_T + P_ref))
+        V_p_t = V_p_ref * (1 - C * log_term)  # [m³/g]
+        V_p_tait.append(V_p_t*1e6)  # [cm³/g]
+    
+    # Plot
+    plt.figure(figsize=(6, 4))
+    plt.plot(P_values/1e5, V_p_saft, 'r-', label='SAFT-γ Mie')
+    plt.plot(P_values/1e5, V_p_tait, 'b--', label='Tait Equation')
+    
+    # Update Widom line values
+    if T in widom_T_P.keys():
+        plt.axvline(x=widom_T_P[T]*1e-5, color='gray', linestyle=':', label='CO₂ Widom Line')
+
+    # Add literature reference points if available
+    plt.xlabel('Pressure (bar)')
+    plt.ylabel('Polymer Specific Volume (cm³/g)')
+    plt.title(f'HDPE Specific Volume at {T-273.15:.0f} °C')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+def plot_density_ratio(base_obj, T=323.15):
+    """Plot density ratio vs pressure to show when problems occur"""
+    P_values = logspace(0, 8.5, 30)  # 1 Pa to 300 MPa
+    
+    # Calculate density ratios
+    rhoT00_values = []
+    rhoTPS_unlimited_values = []
+    rhoTPS_limited_values = []
+    ratio_unlimited_values = []
+    ratio_limited_values = []
+    
+    for P in P_values:
+        obj = S.DetailedSolPol(base_obj, T, P)
+        
+        # Store original Vs_Vp_pmv1 function
+        original_func = obj.Vs_Vp_pmv1
+        
+        # Get reference density at P=1 Pa
+        rhoT00 = obj.rho_tot(T, 1, 0)
+        rhoT00_values.append(rhoT00*1e-6)  # g/cm³
+        
+        # Calculate density without Tait limits by setting pressure_limit=False
+        obj.Vs_Vp_pmv1 = lambda T, P, S_a: original_func(T, P, S_a, pressure_limit=False)
+        rhoTPS_unlimited = obj.rho_tot(T, P, 0)
+        rhoTPS_unlimited_values.append(rhoTPS_unlimited)
+        ratio_unlimited_values.append(rhoT00/rhoTPS_unlimited)
+        
+        # Calculate density with Tait limits by setting pressure_limit=True
+        obj.Vs_Vp_pmv1 = lambda T, P, S_a: original_func(T, P, S_a, pressure_limit=True)
+        rhoTPS_limited = obj.rho_tot(T, P, 0)
+        ratio_limited_values.append(rhoT00/rhoTPS_limited)
+    
+    # Plot
+    plt.figure(figsize=(6, 5))
+    plt.subplot(1,1,1)
+    plt.semilogx(P_values/1e5, ratio_unlimited_values, 'r-', label='Original')
+    plt.semilogx(P_values/1e5, ratio_limited_values, 'b--', label='With Tait Limit')
+    plt.axhline(y=1.0, color='k', linestyle=':')
+    plt.axvline(x=73.8, color='gray', linestyle=':', label='CO₂ Widom Line')
+    plt.ylabel('ρ(T,0,0)/ρ(T,P,0)')
+    plt.legend()
+    plt.show()
+    
+
+def tait_specific_volume(T, P, 
+                         a0=0.882, 
+                         a1=6.51e-4, 
+                         a2=0.0, 
+                         b1=235.0, 
+                         b2=2.1e-3, 
+                         C=0.0894, 
+                         P_ref=0.1013):
+    """
+    Calculate specific volume v(T,P) using the Tait equation for amorphous polyethylene.
+    
+    Parameters:
+    - T : float or array-like, temperature in Kelvin
+    - P : float or array-like, pressure in MPa
+    - a0, a1, a2 : coefficients for temperature dependence of v0(T)
+    - b1, b2     : coefficients for pressure dependence B(T)
+    - C          : universal constant in Tait equation (dimensionless)
+    - P_ref      : reference pressure in MPa (default 0.1013 MPa = 1 atm)
+    
+    Returns:
+    - v : specific volume in cm³/g
+    """
+    T = asarray(T)
+    P = asarray(P)
+
+    v0 = a0 + a1 * T + a2 * T**2
+    B_T = b1 * exp(-b2 * T)
+    
+    log_term = log((B_T + P) / (B_T + P_ref))
+    v = v0 * (1 - C * log_term)
+    return v
+
 if __name__ == "__main__":
     mix = S.BaseSolPol("CO2","HDPE")
     for T in array([25, 35, 50]) + 273:
-        plot_VsVp_pmv(mix, T, display_fig=False, save_fig=True)
+        # Compare values between pmv1, pmv2 and pmv3
+        # plot_VsVp_pmv(mix, T, display_fig=False, save_fig=True)
+        
+        # Compare compressibility between SAFT and Tait
+        plot_polymer_compressibility(mix, T)
+        
+        # Plot polymer density ratio vs pressure
+        # plot_density_ratio(mix, T)
 
     #* Test Vs and Vp vs. S_am at different pressures
     # plot_VsVp_vs_Sam_multiP(mix, T=35+273, p_list=linspace(1e6, 15e6, 10))
+    
