@@ -5,9 +5,16 @@ import matplotlib
 import os
 from solubility_master import DetailedSolPol, SolPolExpData
 
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib
+import os
+from solubility_master import DetailedSolPol, SolPolExpData
+
 def plot_raw_mass_sensitivity(base_obj, T: float, p: float, m_raw_range: list = None, m_raw_variation=0.05,
                              rhoCO2_type='SW', save_fig=False, output_dir=None, 
-                             fig_format='pdf', dpi=300):
+                             fig_format='pdf', dpi=300, export_data=False):
     """
     Plot sensitivity analysis of solubility (S_sc) to variations in raw mass measurements.
     
@@ -21,6 +28,8 @@ def plot_raw_mass_sensitivity(base_obj, T: float, p: float, m_raw_range: list = 
         Pressure in Pa
     m_raw_range : list
         List of raw mass values to analyze
+    m_raw_variation : float
+        Variation in m_raw to analyze when m_raw_range is not provided
     rhoCO2_type : str
         Type of CO2 density data to use ('EXP', 'SW', or 'SAFT')
     save_fig : bool
@@ -31,6 +40,8 @@ def plot_raw_mass_sensitivity(base_obj, T: float, p: float, m_raw_range: list = 
         Format for saved figure ('pdf', 'png', etc.)
     dpi : int
         Resolution for saved figure
+    export_data : bool
+        Whether to export the results to Excel file
         
     Returns:
     --------
@@ -170,6 +181,55 @@ def plot_raw_mass_sensitivity(base_obj, T: float, p: float, m_raw_range: list = 
         fig.savefig(filepath, format=fig_format, dpi=dpi, bbox_inches='tight')
         print(f"Figure saved to {filepath}")
     
+    # Export data to Excel if requested
+    if export_data:
+        # Create DataFrame with the results
+        results_df = pd.DataFrame({
+            'm_raw (g)': m_raw_range,
+            'm_raw change (%)': rel_m_raw,
+            'SwellingRatio': SwR_values,
+            'Solubility (g/g)': S_sc_values
+        })
+        
+        # Add metadata
+        # metadata_df = pd.DataFrame({
+        #     'Parameter': ['Temperature (°C)', 'Pressure (bar)', 'Baseline m_raw (g)', 
+        #                   'CO2 density type', 'Polymer', 'Solvent'],
+        #     'Value': [T-273.15, p/1e5, baseline_m_raw, rhoCO2_type, 
+        #              base_obj.pol, base_obj.sol]
+        # })
+        
+        # Calculate sensitivity metrics if possible
+        # if len(valid_values) >= 3:
+        #     metrics_df = pd.DataFrame({
+        #         'Metric': ['Sensitivity (g/g)/(g)', 'Elasticity'],
+        #         'Value': [sensitivity, elasticity]
+        #     })
+        # else:
+        #     metrics_df = pd.DataFrame({
+        #         'Metric': ['Sensitivity (g/g)/(g)', 'Elasticity'],
+        #         'Value': [None, None]
+        #     })
+        
+        # Prepare directory
+        if output_dir is None:
+            output_dir = os.path.join(os.path.dirname(__file__), 'results')
+        
+        # Create directory if it doesn't exist
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Create Excel filename
+        excel_filename = f'sensitivity_m_raw_{base_obj.sol}_{base_obj.pol}_{T-273:.0f}C_{p/1e5:.0f}bar.xlsx'
+        excel_path = os.path.join(output_dir, excel_filename)
+        
+        # Save to Excel
+        with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
+            results_df.to_excel(writer, sheet_name='Sensitivity Data', index=False)
+            # metadata_df.to_excel(writer, sheet_name='Metadata', index=False)
+            # metrics_df.to_excel(writer, sheet_name='Sensitivity Metrics', index=False)
+        
+        print(f"Data exported to {excel_path}")
+    
     plt.tight_layout()
     return fig
 
@@ -190,6 +250,7 @@ if __name__ == "__main__":
         T=T,
         p=P,
         m_raw_variation=0.05,  # 5% variation
-        save_fig=False
+        save_fig=False,
+        export_data=True  # Export results to Excel
     )
     plt.show()
