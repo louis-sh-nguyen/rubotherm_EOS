@@ -238,7 +238,8 @@ class DetailedSolPol(BaseSolPol):
     
     def solve_solubility(
         self, rhoCO2_type: str = 'SW', x0_list=linspace(0, 0.3, 6),
-        solver_xtol: float = 1.0e-10, unique_solution_rtol: float = 5e-2, solution_filter: bool = True, debug: bool = False,
+        solver_xtol: float = 1.0e-10, unique_solution_rtol: float = 5e-2, custom_m_raw: float = None,
+        solution_filter: bool = True, debug: bool = False, 
         ):  # numerical solving
 
         # Check rhoCO2_data_type is valid
@@ -260,8 +261,16 @@ class DetailedSolPol(BaseSolPol):
         mask = abs(_df["P[bar]"]*1e5 - self.P) <= (self.P*0.01)
         
         try:
-            # Get raw mass
-            m_raw = _df[mask]["MP1*[g]"].values[0] - data.m_met_filled
+            # Use custom m_raw if provided, otherwise get from experimental data
+            if custom_m_raw is not None:
+                m_raw = custom_m_raw
+                if debug:
+                    print(f'Using custom m_raw: {m_raw} g')
+            else:
+                # Get raw mass from data
+                m_raw = _df[mask]["MP1*[g]"].values[0] - data.m_met_filled
+                if debug:
+                    print(f'Using experimental m_raw: {m_raw} g')
             
             if rhoCO2_type == 'EXP':
                 # Use EXP values of rho_f
