@@ -396,7 +396,7 @@ def tait_specific_volume(T, P,
 
 if __name__ == "__main__":
     mix = S.BaseSolPol("CO2","HDPE")
-    for T in array([50]) + 273:
+    for T in array([25, 35]) + 273:
         # Compare values between pmv1, pmv2 and pmv3
         # plot_VsVp_pmv(mix, T, display_fig=False, save_fig=True)
         
