@@ -240,8 +240,10 @@ if __name__ == "__main__":
     # Create base object
     base_obj = BaseSolPol('CO2', 'HDPE')
     
-    T_values = [35+273,35+273, 50+273]  # [°C]
-    P_values = [100.28e5, 20139060, 101.04e5, 200.8766*1e5]  # [Pa]
+    # T_values = [35+273,35+273, 50+273, 50+273]  # [°C]
+    # P_values = [100.28e5, 20139060, 101.04e5, 200.8766*1e5]  # [Pa]
+    T_values = [50+273]  # [°C]
+    P_values = [200.8766*1e5]  # [Pa]
 
     for T, P in zip(T_values, P_values):
         # Call function
