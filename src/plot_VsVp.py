@@ -181,14 +181,42 @@ def plot_VsVp_vs_Sam_multiP(base_obj, T, p_list):
     plt.show()
 
 
-def plot_polymer_compressibility(base_obj, T=323.15):
-    """Plot polymer specific volume vs pressure using different methods. Assuming almost pure polymer"""
+def plot_polymer_compressibility(base_obj, T=323.15, save_fig=False, export_data=False, output_dir=None):
+    """
+    Plot polymer specific volume vs pressure using different methods. Assuming almost pure polymer.
+    Also exports data to Excel file if requested.
+    
+    Parameters:
+    -----------
+    base_obj : BaseSolPol object
+        Base solubility-polymer object
+    T : float
+        Temperature in K (default 323.15 K = 50°C)
+    save_fig : bool
+        Whether to save the figure
+    export_data : bool
+        Whether to export data to Excel file
+    output_dir : str
+        Directory for saved outputs (defaults to current directory)
+    """
+    import pandas as pd
+    import os
+    from datetime import datetime
+    
+    # Output directory handling
+    if output_dir is None:
+        output_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Create timestamp
+    now = datetime.now()
+    time_str = now.strftime("%y%m%d_%H%M")  # YYMMDD_HHMM
+    
     # CO₂ Widom line values (K, Pa)
     widom_T_P = {35+273: 80.4e5, 
                  50+273: 103e5}  
         
     # P_values = logspace(0, 8.5, 30)  # 1 Pa to 300 MPa
-    P_values = linspace(0, 500e5, 50)  # 1 Pa to 300 MPa
+    P_values = linspace(0, 500e5, 50)  # 0 to 500 bar in Pa
     obj = S.DetailedSolPol(base_obj, T, 1e5)
 
     # Calculate V_p using different methods
@@ -223,13 +251,14 @@ def plot_polymer_compressibility(base_obj, T=323.15):
         V_p_tait.append(V_p_t*1e6)  # [cm³/g]
     
     # Plot
-    plt.figure(figsize=(6, 4))
+    fig = plt.figure(figsize=(6, 4))
     plt.plot(P_values/1e5, V_p_saft, 'r-', label='SAFT-γ Mie')
     plt.plot(P_values/1e5, V_p_tait, 'b--', label='Tait Equation')
     
-    # Update Widom line values
+    # Add Widom line if available for this temperature
     if T in widom_T_P.keys():
-        plt.axvline(x=widom_T_P[T]*1e-5, color='gray', linestyle=':', label='CO₂ Widom Line')
+        widom_P = widom_T_P[T]*1e-5  # Convert to bar
+        plt.axvline(x=widom_P, color='gray', linestyle=':', label='CO₂ Widom Line')
 
     # Add literature reference points if available
     plt.xlabel('Pressure (bar)')
@@ -238,7 +267,56 @@ def plot_polymer_compressibility(base_obj, T=323.15):
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
+    
+    # Export data to Excel if requested
+    if export_data:
+        # Create DataFrame with the results
+        data_df = pd.DataFrame({
+            'Pressure (Pa)': P_values,
+            'Pressure (bar)': P_values/1e5,
+            'V_p SAFT (cm³/g)': V_p_saft,
+            'V_p Tait (cm³/g)': V_p_tait
+        })
+        
+        # Add metadata
+        metadata_df = pd.DataFrame({
+            'Parameter': ['Temperature (°C)', 'Temperature (K)', 'Polymer', 'Solvent',
+                         'Tait C constant', 'Tait b1 (Pa)', 'Tait b2'],
+            'Value': [T-273.15, T, base_obj.pol, base_obj.sol, 
+                     C, b1, b2]
+        })
+        
+        # Add Widom line info if available
+        if T in widom_T_P.keys():
+            widom_df = pd.DataFrame({
+                'Parameter': ['Widom Line Pressure (Pa)', 'Widom Line Pressure (bar)'],
+                'Value': [widom_T_P[T], widom_T_P[T]*1e-5]
+            })
+            metadata_df = pd.concat([metadata_df, widom_df], ignore_index=True)
+        
+        # Create Excel filename
+        excel_filename = f'polymer_compressibility_{base_obj.pol}_{T-273.15:.0f}C_{time_str}.xlsx'
+        excel_path = os.path.join(output_dir, excel_filename)
+        
+        # Save to Excel
+        with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
+            data_df.to_excel(writer, sheet_name='Compressibility Data', index=False)
+            metadata_df.to_excel(writer, sheet_name='Metadata', index=False)
+        
+        print(f"Data exported to {excel_path}")
+    
+    # Save figure if requested
+    if save_fig:
+        # Create filename
+        fig_filename = f'polymer_compressibility_{base_obj.pol}_{T-273.15:.0f}C_{time_str}.png'
+        fig_path = os.path.join(output_dir, fig_filename)
+        
+        # Save figure
+        plt.savefig(fig_path, dpi=400, bbox_inches='tight')
+        print(f"Figure saved to {fig_path}")
+    
     plt.show()
+    return fig
 
 def plot_density_ratio(base_obj, T=323.15):
     """Plot density ratio vs pressure to show when problems occur"""
@@ -318,12 +396,17 @@ def tait_specific_volume(T, P,
 
 if __name__ == "__main__":
     mix = S.BaseSolPol("CO2","HDPE")
-    for T in array([25, 35, 50]) + 273:
+    for T in array([50]) + 273:
         # Compare values between pmv1, pmv2 and pmv3
         # plot_VsVp_pmv(mix, T, display_fig=False, save_fig=True)
         
         # Compare compressibility between SAFT and Tait
-        plot_polymer_compressibility(mix, T)
+        plot_polymer_compressibility(
+            mix, 
+            T, 
+            save_fig=True,
+            export_data=True
+        )
         
         # Plot polymer density ratio vs pressure
         # plot_density_ratio(mix, T)

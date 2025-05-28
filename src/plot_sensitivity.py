@@ -75,7 +75,7 @@ def plot_raw_mass_sensitivity(base_obj, T: float, p: float, m_raw_range: list = 
     if m_raw_range is None:
         m_raw_min = baseline_m_raw * (1 - m_raw_variation)
         m_raw_max = baseline_m_raw * (1 + m_raw_variation)
-        m_raw_range = np.linspace(m_raw_min, m_raw_max, 20)
+        m_raw_range = np.linspace(m_raw_min, m_raw_max, 11)
 
     print(f"Baseline m_raw: {baseline_m_raw:.6f} g")
 
@@ -88,10 +88,10 @@ def plot_raw_mass_sensitivity(base_obj, T: float, p: float, m_raw_range: list = 
             # Use the solve_solubility method with custom_m_raw parameter
             SwR_vals, S_sc_vals = sol_pol.solve_solubility(
                 rhoCO2_type=rhoCO2_type,
-                x0_list=np.linspace(0.01, 0.3, 6),
+                x0_list=np.linspace(0.0, 0.2, 5),
                 solver_xtol=1.0e-10,
                 custom_m_raw=m_raw,
-                debug=False
+                debug=True
             )
             
             if SwR_vals[0] is not None:
@@ -168,7 +168,7 @@ def plot_raw_mass_sensitivity(base_obj, T: float, p: float, m_raw_range: list = 
     # Save figure if requested
     if save_fig:
         if output_dir is None:
-            output_dir = os.path.join(os.path.dirname(__file__), 'figures')
+            output_dir = os.path.join(os.path.dirname(__file__), 'results')
         
         # Create directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
@@ -240,17 +240,17 @@ if __name__ == "__main__":
     # Create base object
     base_obj = BaseSolPol('CO2', 'HDPE')
     
-    # Example at 50°C and 200 bar
-    T = 50+273  # K
-    P = 200.8766*1e5  # Pa    
-    
-    # Call function
-    fig = plot_raw_mass_sensitivity(
-        base_obj=base_obj,
-        T=T,
-        p=P,
-        m_raw_variation=0.05,  # 5% variation
-        save_fig=False,
+    T_values = [35+273,35+273, 50+273]  # [°C]
+    P_values = [100.28e5, 20139060, 101.04e5, 200.8766*1e5]  # [Pa]
+
+    for T, P in zip(T_values, P_values):
+        # Call function
+        fig = plot_raw_mass_sensitivity(
+            base_obj=base_obj,
+            T=T,
+            p=P,
+            m_raw_variation=0.02,  # 5% variation
+        save_fig=True,
         export_data=True  # Export results to Excel
     )
-    plt.show()
+    # plt.show()
