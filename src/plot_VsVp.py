@@ -242,17 +242,20 @@ def plot_polymer_compressibility(base_obj, T=323.15, save_fig=False, export_data
         
         # Apply Tait equation with temperature dependence on the reference volume
         # Bicerano, Prediction of Polymer Properties, 3rd edition
-        C = 0.0849   # Tait constant
-        b1=235.0e6  # Characteristic pressure [Pa]
-        b2=2.1e-3
-        B_T = b1 * exp(-b2 * T) # [Pa]
-        log_term = log((B_T + P) / (B_T + P_ref))
-        
-        # C = 0.0894   # Tait constant
-        # b1=197.1e6  # Characteristic pressure [Pa]
-        # b2=5.11e-3
+        # C = 0.0849   # Tait constant
+        # b1=235.0e6  # Characteristic pressure [Pa]
+        # b2=2.1e-3
         # B_T = b1 * exp(-b2 * T) # [Pa]
-        # log_term = log( 1+  P / B_T)
+        # log_term = log((B_T + P) / (B_T + P_ref))
+        
+        # Capt & Kamal, The Pressure-Volume-Temperature Behavior Polyethylene Melts
+        t = T - 273.15  # Convert to Celsius for Tait equation
+        C = 0.0894   # Tait constant
+        b1=176.7e6  # Characteristic pressure [Pa]
+        b2=4.66e-3
+        B_T = b1 * exp(-b2 * t) # [Pa]
+        log_term = log( 1+  P / B_T)
+        
         V_p_t = V_p_ref * (1 - C * log_term)  # [m³/g]
         V_p_tait.append(V_p_t*1e6)  # [cm³/g]
     
@@ -411,7 +414,7 @@ if __name__ == "__main__":
             mix, 
             T, 
             save_fig=False,
-            export_data=False
+            export_data=True
         )
         
         # Plot polymer density ratio vs pressure
