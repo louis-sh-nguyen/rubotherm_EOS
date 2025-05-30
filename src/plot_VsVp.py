@@ -241,12 +241,18 @@ def plot_polymer_compressibility(base_obj, T=323.15, save_fig=False, export_data
         # V_p_tait.append(V_p_t*1e6)  # Convert to cm³/g
         
         # Apply Tait equation with temperature dependence on the reference volume
-        # Capt & Kamal, Int. Polym. Process. 15 (1) 83-94 (2000)        
+        # Bicerano, Prediction of Polymer Properties, 3rd edition
         C = 0.0849   # Tait constant
         b1=235.0e6  # Characteristic pressure [Pa]
         b2=2.1e-3
         B_T = b1 * exp(-b2 * T) # [Pa]
         log_term = log((B_T + P) / (B_T + P_ref))
+        
+        # C = 0.0894   # Tait constant
+        # b1=197.1e6  # Characteristic pressure [Pa]
+        # b2=5.11e-3
+        # B_T = b1 * exp(-b2 * T) # [Pa]
+        # log_term = log( 1+  P / B_T)
         V_p_t = V_p_ref * (1 - C * log_term)  # [m³/g]
         V_p_tait.append(V_p_t*1e6)  # [cm³/g]
     
@@ -396,7 +402,7 @@ def tait_specific_volume(T, P,
 
 if __name__ == "__main__":
     mix = S.BaseSolPol("CO2","HDPE")
-    for T in array([25, 35]) + 273:
+    for T in array([25, 35, 50]) + 273:
         # Compare values between pmv1, pmv2 and pmv3
         # plot_VsVp_pmv(mix, T, display_fig=False, save_fig=True)
         
@@ -404,8 +410,8 @@ if __name__ == "__main__":
         plot_polymer_compressibility(
             mix, 
             T, 
-            save_fig=True,
-            export_data=True
+            save_fig=False,
+            export_data=False
         )
         
         # Plot polymer density ratio vs pressure
