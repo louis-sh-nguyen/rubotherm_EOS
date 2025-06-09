@@ -224,6 +224,7 @@ if __name__ == '__main__':
     
     #* Find solutions
     # get_solubility_solutions(base_obj,x0=linspace(0, 0.2, 5), solver_xtol=1e-12,
+    #                             #  T=35+273,  p_selected_list=[100.2838*1e5],    # 35 °C
     #                                 #  T=35+273,  p_selected_list=[20139060],    # 35 °C
     #                                 #  T=50+273, p_selected_list=[10103760],    # 50 °C 10 MPa
     #                                  T=50+273, p_selected_list=[200.8766*1e5],    # 50 °C 200 MPa
@@ -239,7 +240,7 @@ if __name__ == '__main__':
     
     #* Root evaluation
     # plot_solubility_solutions_rootEvaluation(base_obj, 35+273, 20139060, 'SwR')
-    plot_solubility_solutions_rootEvaluation(base_obj, 50+273, 20087660, 'Ssc', pmv_method=3)
+    plot_solubility_solutions_rootEvaluation(base_obj, 50+273, 20087660, 'SwR')
     
     ## NOTE High pressure no solution diagnostic:
     # 1) excessive polymer compressibility (Vp too small at high pressure)
